@@ -16,11 +16,12 @@ import { Button } from "@/components/ui/button"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { writeFile, readFile, deleteFile } from "@/commands/fs"
-import { normalizePath } from "@/lib/path-utils"
+import { getFileName, normalizePath } from "@/lib/path-utils"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { hasConfiguredDeepResearchSources } from "@/lib/web-search"
 import { makeQueryFileName } from "@/lib/wiki-filename"
-import { createReviewPageDrafts } from "@/lib/review-create-page"
+import { buildReviewPageContent, createReviewPageDrafts } from "@/lib/review-create-page"
+import { sourceIdentityForPath } from "@/lib/source-identity"
 import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from "@/lib/chat-save-to-wiki"
 import { useTranslation } from "react-i18next"
 
@@ -207,12 +208,14 @@ export function ReviewView() {
             date: string
           }> = []
 
+          // 溯源链：把审阅项携带的原始源文件身份写进新页 frontmatter 的 sources
+          const sourceIdentity = item.sourcePath
+            ? sourceIdentityForPath(pp, item.sourcePath)
+            : null
           for (const draft of drafts) {
             const { date, fileName } = makeQueryFileName(draft.title)
             const filePath = `${pp}/wiki/${draft.dir}/${fileName}`
-            const frontmatter = `---\ntype: ${draft.pageType}\ntitle: "${draft.title.replace(/"/g, '\\"')}"\ncreated: ${date}\ntags: []\nrelated: []\n---\n\n`
-            const body = `# ${draft.title}\n\n${item.description}\n`
-            const pageContent = frontmatter + body
+            const pageContent = buildReviewPageContent(draft, item, date, sourceIdentity)
             await writeFile(filePath, pageContent)
             created.push({ title: draft.title, dir: draft.dir, fileName, filePath, pageContent, pageType: draft.pageType, date })
           }
@@ -429,6 +432,7 @@ function ReviewCard({
   const { t } = useTranslation()
   const config = typeConfig[item.type]
   const Icon = config.icon
+  const sourcePath = item.sourcePath
 
   return (
     <div
@@ -463,6 +467,19 @@ function ReviewCard({
       {item.affectedPages && item.affectedPages.length > 0 && (
         <div className="mb-3 text-xs text-muted-foreground">
           Pages: {item.affectedPages.join(", ")}
+        </div>
+      )}
+
+      {sourcePath && (
+        <div className="mb-3 text-xs text-muted-foreground">
+          Source:{" "}
+          <button
+            onClick={() => useWikiStore.getState().openPathInPreview(sourcePath)}
+            className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+            title={sourcePath}
+          >
+            {getFileName(sourcePath)}
+          </button>
         </div>
       )}
 

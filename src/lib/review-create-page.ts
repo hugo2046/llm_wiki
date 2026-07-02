@@ -1,3 +1,4 @@
+import { getFileStem } from "@/lib/path-utils"
 import type { ReviewItem } from "@/stores/review-store"
 
 export type ReviewPageType = "entity" | "concept" | "comparison" | "synthesis" | "query"
@@ -80,6 +81,44 @@ function dirForPageType(pageType: ReviewPageType): string {
     default:
       return "queries"
   }
+}
+
+/**
+ * 由审阅项构造新建 wiki 页面的完整内容（frontmatter + 正文）。
+ *
+ * 溯源链关键：审阅项携带的 sourceIdentity（原始源文件相对 raw/sources 的身份）
+ * 写入 sources 字段，affectedPages 转为裸 slug 写入 related，
+ * 与 ingest 直接生成页面的 frontmatter 约定保持一致。
+ *
+ * :param draft: 页面草稿（标题/类型/目录）
+ * :param item: 审阅项（提供正文描述与 affectedPages）
+ * :param date: 页面 created 日期（YYYY-MM-DD）
+ * :param sourceIdentity: 原始源文件身份；为 null 时省略 sources 行
+ * :returns: 可直接写盘的页面全文
+ */
+/** 把字符串转为带双引号的 YAML 标量（转义内部双引号）。 */
+const yamlStr = (value: string) => `"${value.replace(/"/g, '\\"')}"`
+
+export function buildReviewPageContent(
+  draft: ReviewPageDraft,
+  item: ReviewItem,
+  date: string,
+  sourceIdentity: string | null,
+): string {
+  const relatedSlugs = (item.affectedPages ?? [])
+    .map(getFileStem)
+    .filter((slug) => slug.length > 0)
+
+  const lines = [
+    "---",
+    `type: ${draft.pageType}`,
+    `title: ${yamlStr(draft.title)}`,
+    `created: ${date}`,
+  ]
+  if (sourceIdentity) lines.push(`sources: [${yamlStr(sourceIdentity)}]`)
+  lines.push("tags: []", `related: [${relatedSlugs.map(yamlStr).join(", ")}]`, "---", "")
+
+  return `${lines.join("\n")}\n# ${draft.title}\n\n${item.description}\n`
 }
 
 export function createReviewPageDrafts(item: ReviewItem, action: string): ReviewPageDraft[] {
