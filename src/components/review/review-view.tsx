@@ -21,7 +21,8 @@ import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { hasConfiguredDeepResearchSources } from "@/lib/web-search"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { buildReviewPageContent, createReviewPageDrafts } from "@/lib/review-create-page"
-import { sourceIdentityForPath } from "@/lib/source-identity"
+import { rawSourceIdentityOrNull } from "@/lib/source-identity"
+import { parseSources } from "@/lib/sources-merge"
 import { cleanAssistantContentForWikiSave, titleFromCleanAssistantContent } from "@/lib/chat-save-to-wiki"
 import { useTranslation } from "react-i18next"
 
@@ -208,14 +209,25 @@ export function ReviewView() {
             date: string
           }> = []
 
-          // 溯源链：把审阅项携带的原始源文件身份写进新页 frontmatter 的 sources
-          const sourceIdentity = item.sourcePath
-            ? sourceIdentityForPath(pp, item.sourcePath)
+          // 溯源链：审阅项自身来源（仅限 raw/sources 下的真实源文件）
+          // 与受影响页面 frontmatter 中的来源取并集，一并写入新页 sources，
+          // 使跨来源矛盾可以直接核对所有原始文档
+          const sourceIdentities: string[] = []
+          const ownIdentity = item.sourcePath
+            ? rawSourceIdentityOrNull(pp, item.sourcePath)
             : null
+          if (ownIdentity) sourceIdentities.push(ownIdentity)
+          for (const page of item.affectedPages ?? []) {
+            try {
+              sourceIdentities.push(...parseSources(await readFile(`${pp}/${page}`)))
+            } catch {
+              // 受影响页面可能已不存在或不是有效路径，跳过
+            }
+          }
           for (const draft of drafts) {
             const { date, fileName } = makeQueryFileName(draft.title)
             const filePath = `${pp}/wiki/${draft.dir}/${fileName}`
-            const pageContent = buildReviewPageContent(draft, item, date, sourceIdentity)
+            const pageContent = buildReviewPageContent(draft, item, date, sourceIdentities)
             await writeFile(filePath, pageContent)
             created.push({ title: draft.title, dir: draft.dir, fileName, filePath, pageContent, pageType: draft.pageType, date })
           }
@@ -466,13 +478,13 @@ function ReviewCard({
 
       {item.affectedPages && item.affectedPages.length > 0 && (
         <div className="mb-3 text-xs text-muted-foreground">
-          Pages: {item.affectedPages.join(", ")}
+          {t("review.pages")}: {item.affectedPages.join(", ")}
         </div>
       )}
 
       {sourcePath && (
         <div className="mb-3 text-xs text-muted-foreground">
-          Source:{" "}
+          {t("review.source")}:{" "}
           <button
             onClick={() => useWikiStore.getState().openPathInPreview(sourcePath)}
             className="underline decoration-dotted underline-offset-2 hover:text-foreground"

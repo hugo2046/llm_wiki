@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   legacySourceSummarySlugFromIdentity,
+  rawSourceIdentityOrNull,
   sourceIdentityForPath,
   sourceReferenceIdentity,
   sourceSummarySlugCandidatesFromIdentity,
@@ -8,6 +9,18 @@ import {
 } from "./source-identity"
 
 describe("source identity helpers", () => {
+  it("rawSourceIdentityOrNull returns the identity for paths under raw/sources", () => {
+    expect(
+      rawSourceIdentityOrNull("/tmp/project", "/tmp/project/raw/sources/a-纪要.docx"),
+    ).toBe("a-纪要.docx")
+  })
+
+  it("rawSourceIdentityOrNull returns null for paths outside raw/sources", () => {
+    expect(
+      rawSourceIdentityOrNull("/tmp/project", "/tmp/project/wiki/queries/research-x.md"),
+    ).toBeNull()
+  })
+
   it("keeps raw/sources relative folder context as the source identity", () => {
     expect(
       sourceIdentityForPath("/tmp/project", "/tmp/project/raw/sources/project-a/config.yaml"),

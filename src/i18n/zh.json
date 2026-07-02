@@ -233,7 +233,9 @@
     "markSelectedResolved": "标记为已解决",
     "dismissSelected": "忽略选中项",
     "allClear": "一切正常，无需审阅",
-    "resolvedDivider": "— 已解决 —"
+    "resolvedDivider": "— 已解决 —",
+    "pages": "页面",
+    "source": "来源"
   },
   "settings": {
     "title": "设置",

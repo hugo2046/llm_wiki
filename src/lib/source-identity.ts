@@ -5,7 +5,13 @@ const RAW_SOURCES_MARKER = "/raw/sources/"
 const MAX_SOURCE_SUMMARY_SLUG_LENGTH = 120
 const FALLBACK_SOURCE_PART = "source"
 
-export function sourceIdentityForPath(projectPath: string, sourcePath: string): string {
+/**
+ * 仅当路径确实位于 raw/sources 下时返回来源身份，否则返回 null。
+ *
+ * 与 sourceIdentityForPath 的区别：不做裸文件名回退——wiki 页等
+ * 非原始来源路径不应被当作来源身份写入 frontmatter sources。
+ */
+export function rawSourceIdentityOrNull(projectPath: string, sourcePath: string): string | null {
   const pp = normalizePath(projectPath).replace(/\/+$/, "")
   const sp = normalizePath(sourcePath)
   const projectRawSourcesPrefix = `${pp}/${RAW_SOURCES_PREFIX}`
@@ -20,7 +26,13 @@ export function sourceIdentityForPath(projectPath: string, sourcePath: string): 
   if (markerIndex >= 0) {
     return sp.slice(markerIndex + RAW_SOURCES_MARKER.length)
   }
-  return getFileName(sp)
+  return null
+}
+
+export function sourceIdentityForPath(projectPath: string, sourcePath: string): string {
+  return (
+    rawSourceIdentityOrNull(projectPath, sourcePath) ?? getFileName(normalizePath(sourcePath))
+  )
 }
 
 export function sourceReferenceIdentity(sourceReference: string): string {

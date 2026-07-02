@@ -233,7 +233,9 @@
     "markSelectedResolved": "Mark selected resolved",
     "dismissSelected": "Dismiss selected",
     "allClear": "All clear — nothing to review",
-    "resolvedDivider": "— Resolved —"
+    "resolvedDivider": "— Resolved —",
+    "pages": "Pages",
+    "source": "Source"
   },
   "settings": {
     "title": "Settings",
