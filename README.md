@@ -39,6 +39,7 @@
 - **Vector Semantic Search** — optional embedding-based retrieval via LanceDB, supports any OpenAI-compatible endpoint
 - **Persistent Ingest Queue** — serial processing with crash recovery, cancel, retry, and progress visualization
 - **Folder Import** — recursive folder import preserving directory structure, folder context as LLM classification hint
+- **Finance Source Naming** — Finance template normalizes imported meeting notes to `yyyymmdd-ticker-name-title` using a `stock_basic.csv` lookup ([docs](docs/finance-source-naming.md))
 - **Source Folder Auto-Watch** — detects external changes in `raw/sources/` and keeps ingest/delete cleanup in sync
 - **Deep Research** — LLM-optimized search topics, multi-query web search via Tavily, SerpApi, or SearXNG, auto-ingest results into wiki
 - **Async Review System** — LLM flags items for human judgment, predefined actions, pre-generated search queries
