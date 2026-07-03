@@ -105,6 +105,8 @@ interface SearchApiConfig {
   providerConfigs?: SearchProviderConfigs
   deepResearchSource?: DeepResearchSource
   anyTxt?: AnyTxtConfig
+  /** MCP 数据源列表（Streamable HTTP）；enabled 的 server 参与 deep-research */
+  mcpServers?: import("@/lib/mcp-search").McpServerConfig[]
 }
 
 interface EmbeddingConfig {

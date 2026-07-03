@@ -257,3 +257,67 @@ describe("buildFinanceSearchContext", () => {
     )
   })
 })
+
+describe("collectResearchSources with MCP", () => {
+  const mcpServer = {
+    id: "s1",
+    name: "tushare",
+    url: "http://127.0.0.1:8000/mcp",
+    toolName: "stock_news",
+    queryParam: "query",
+    enabled: true,
+  }
+  const mcpResult: WebSearchResult = {
+    title: "tushare/stock_news",
+    url: "",
+    snippet: "mcp snippet",
+    source: "MCP:tushare",
+  }
+
+  it("启用的 server 对每个查询词调用并归并结果", async () => {
+    const mcpCall = vi.fn().mockResolvedValue([mcpResult])
+    const { results, errors } = await collectResearchSources(
+      ["q1", "q2"],
+      config({ deepResearchSource: "web", mcpServers: [mcpServer] }),
+      "C:/proj",
+      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpCall },
+    )
+    expect(mcpCall).toHaveBeenCalledTimes(2)
+    expect(mcpCall).toHaveBeenCalledWith(mcpServer, "q1")
+    expect(mcpCall).toHaveBeenCalledWith(mcpServer, "q2")
+    expect(results).toEqual([mcpResult]) // 两次相同结果被去重为一条
+    expect(errors).toEqual([])
+  })
+
+  it("禁用与配置不全的 server 不调用", async () => {
+    const mcpCall = vi.fn()
+    await collectResearchSources(
+      ["q"],
+      config({
+        mcpServers: [
+          { ...mcpServer, enabled: false },
+          { ...mcpServer, id: "s2", url: "  " },
+          { ...mcpServer, id: "s3", toolName: "" },
+        ],
+      }),
+      "C:/proj",
+      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpCall },
+    )
+    expect(mcpCall).not.toHaveBeenCalled()
+  })
+
+  it("单 server 失败进 errors 且不影响其他源", async () => {
+    const { results, errors } = await collectResearchSources(
+      ["q"],
+      config({ provider: "tavily", apiKey: "k", deepResearchSource: "web", mcpServers: [mcpServer] }),
+      "C:/proj",
+      {
+        webSearch: vi.fn().mockResolvedValue([webResult]),
+        anyTxtSearch: vi.fn().mockResolvedValue([]),
+        mcpCall: vi.fn().mockRejectedValue(new Error("MCP tushare: ECONNREFUSED")),
+      },
+    )
+    expect(results).toEqual([webResult])
+    expect(errors).toEqual(["MCP tushare: ECONNREFUSED"])
+  })
+})

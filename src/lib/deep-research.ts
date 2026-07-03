@@ -1,5 +1,6 @@
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
+import { callMcpTool } from "./mcp-search"
 import { streamChat } from "./llm-client"
 import { autoIngest, currentWikiDate } from "./ingest"
 import { writeFile, readFile } from "@/commands/fs"
@@ -85,6 +86,8 @@ export function buildFinanceSearchContext(
 interface ResearchSourceDeps {
   webSearch: typeof webSearch
   anyTxtSearch: typeof anyTxtSearchSmart
+  /** MCP 检索调用；缺省回退真实实现（便于测试注入） */
+  mcpCall?: typeof callMcpTool
 }
 
 interface CollectResearchSourceOptions {
@@ -195,6 +198,17 @@ export async function collectResearchSources(
   }
   if (useAnyTxt) {
     calls.push(deps.anyTxtSearch(queries, resolvedSearchConfig.anyTxt, options.llmConfig, 15, projectPath).then((results) => ({ results })))
+  }
+
+  // MCP 数据源：启用且配置完整的 server × 每个查询词，追加在 web/anytxt 之后
+  const mcpCall = deps.mcpCall ?? callMcpTool
+  const mcpServers = (resolvedSearchConfig.mcpServers ?? []).filter(
+    (s) => s.enabled && s.url.trim() && s.toolName.trim(),
+  )
+  for (const server of mcpServers) {
+    for (const mcpQuery of webQueries) {
+      calls.push(mcpCall(server, mcpQuery).then((results) => ({ results })))
+    }
   }
 
   const settled = await Promise.allSettled(calls)
