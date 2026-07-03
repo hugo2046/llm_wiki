@@ -274,23 +274,22 @@ describe("collectResearchSources with MCP", () => {
     source: "MCP:tushare",
   }
 
-  it("启用的 server 对每个查询词调用并归并结果", async () => {
-    const mcpCall = vi.fn().mockResolvedValue([mcpResult])
+  it("启用的 server 收到一次批量调用（全部查询词），结果归并去重", async () => {
+    const mcpBatch = vi.fn().mockResolvedValue({ results: [mcpResult, mcpResult], errors: [] })
     const { results, errors } = await collectResearchSources(
       ["q1", "q2"],
       config({ deepResearchSource: "web", mcpServers: [mcpServer] }),
       "C:/proj",
-      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpCall },
+      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpBatch },
     )
-    expect(mcpCall).toHaveBeenCalledTimes(2)
-    expect(mcpCall).toHaveBeenCalledWith(mcpServer, "q1")
-    expect(mcpCall).toHaveBeenCalledWith(mcpServer, "q2")
-    expect(results).toEqual([mcpResult]) // 两次相同结果被去重为一条
+    expect(mcpBatch).toHaveBeenCalledTimes(1)
+    expect(mcpBatch).toHaveBeenCalledWith(mcpServer, ["q1", "q2"])
+    expect(results).toEqual([mcpResult]) // 相同结果被去重为一条
     expect(errors).toEqual([])
   })
 
   it("禁用与配置不全的 server 不调用", async () => {
-    const mcpCall = vi.fn()
+    const mcpBatch = vi.fn()
     await collectResearchSources(
       ["q"],
       config({
@@ -301,12 +300,12 @@ describe("collectResearchSources with MCP", () => {
         ],
       }),
       "C:/proj",
-      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpCall },
+      { webSearch: vi.fn().mockResolvedValue([]), anyTxtSearch: vi.fn().mockResolvedValue([]), mcpBatch },
     )
-    expect(mcpCall).not.toHaveBeenCalled()
+    expect(mcpBatch).not.toHaveBeenCalled()
   })
 
-  it("单 server 失败进 errors 且不影响其他源", async () => {
+  it("批内失败进 errors 且不影响其他源", async () => {
     const { results, errors } = await collectResearchSources(
       ["q"],
       config({ provider: "tavily", apiKey: "k", deepResearchSource: "web", mcpServers: [mcpServer] }),
@@ -314,7 +313,7 @@ describe("collectResearchSources with MCP", () => {
       {
         webSearch: vi.fn().mockResolvedValue([webResult]),
         anyTxtSearch: vi.fn().mockResolvedValue([]),
-        mcpCall: vi.fn().mockRejectedValue(new Error("MCP tushare: ECONNREFUSED")),
+        mcpBatch: vi.fn().mockResolvedValue({ results: [], errors: ["MCP tushare: ECONNREFUSED"] }),
       },
     )
     expect(results).toEqual([webResult])

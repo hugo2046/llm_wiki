@@ -1,6 +1,6 @@
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
-import { callMcpTool } from "./mcp-search"
+import { callMcpToolBatch } from "./mcp-search"
 import { streamChat } from "./llm-client"
 import { autoIngest, currentWikiDate } from "./ingest"
 import { writeFile, readFile } from "@/commands/fs"
@@ -87,8 +87,8 @@ export function buildFinanceSearchContext(
 interface ResearchSourceDeps {
   webSearch: typeof webSearch
   anyTxtSearch: typeof anyTxtSearchSmart
-  /** MCP 检索调用；缺省回退真实实现（便于测试注入） */
-  mcpCall?: typeof callMcpTool
+  /** MCP 批量检索调用（每 server 一次会话复用于全部查询）；缺省回退真实实现 */
+  mcpBatch?: typeof callMcpToolBatch
 }
 
 interface CollectResearchSourceOptions {
@@ -201,15 +201,19 @@ export async function collectResearchSources(
     calls.push(deps.anyTxtSearch(queries, resolvedSearchConfig.anyTxt, options.llmConfig, 15, projectPath).then((results) => ({ results })))
   }
 
-  // MCP 数据源：启用且配置完整的 server × 每个查询词，追加在 web/anytxt 之后
-  const mcpCall = deps.mcpCall ?? callMcpTool
+  // MCP 数据源：启用且配置完整的 server 各发一个批次（会话复用于全部
+  // 查询词），追加在 web/anytxt 之后；批内单查询失败并入统一错误通道
+  const mcpBatch = deps.mcpBatch ?? callMcpToolBatch
   const mcpServers = (resolvedSearchConfig.mcpServers ?? []).filter(
     (s) => s.enabled && s.url.trim() && s.toolName.trim(),
   )
   for (const server of mcpServers) {
-    for (const mcpQuery of webQueries) {
-      calls.push(mcpCall(server, mcpQuery).then((results) => ({ results })))
-    }
+    calls.push(
+      mcpBatch(server, webQueries).then(({ results, errors: batchErrors }) => {
+        errors.push(...batchErrors)
+        return { results }
+      }),
+    )
   }
 
   const settled = await Promise.allSettled(calls)
@@ -399,8 +403,9 @@ async function executeResearch(
     const { fileName, date } = makeDeepResearchFileName(topic)
     const filePath = `${pp}/wiki/queries/${fileName}`
 
+    // 无 URL 的来源（MCP 结果）输出纯标题，避免空 href 死链接
     const references = orderedResults
-      .map((r, i) => `${i + 1}. [${r.title}](${r.url}) — ${r.source}`)
+      .map((r, i) => `${i + 1}. ${r.url ? `[${r.title}](${r.url})` : r.title} — ${r.source}`)
       .join("\n")
 
     // Strip <think>/<thinking> blocks before saving

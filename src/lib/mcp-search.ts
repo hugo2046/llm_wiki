@@ -6,7 +6,7 @@
  * 纯逻辑（参数构造/SSE 解析/结果映射）与 IO（callMcpTool/testMcpServer）
  * 分离，前者可脱离网络单测。
  */
-import { getHttpFetch } from "@/lib/tauri-fetch"
+import { getHttpFetch, isFetchNetworkError } from "@/lib/tauri-fetch"
 import type { WebSearchResult } from "./web-search"
 
 export interface McpServerConfig {
@@ -89,29 +89,48 @@ export function parseSseJsonRpcResponse(body: string, id: number): JsonRpcRespon
   return null
 }
 
+/** title 中查询词的截断上限（保持引用行紧凑）。 */
+const TITLE_QUERY_MAX_CHARS = 40
+
 /**
  * tools/call 结果的 text block 映射为检索结果。
  *
+ * title 携带查询词：同一 server×tool 对多个查询的结果在 References
+ * 中可区分、可回溯（url 恒为空，title 是唯一的辨识信息）。
+ *
  * :param server: server 配置（供 title/source 命名）
  * :param blocks: content blocks
+ * :param query: 本次调用的查询词
  * :returns: 每个非空 text block 一条结果，snippet 截断至 2000 字符
  */
 export function mapMcpContent(
   server: McpServerConfig,
   blocks: McpContentBlock[],
+  query: string,
 ): WebSearchResult[] {
+  const shortQuery = query.length > TITLE_QUERY_MAX_CHARS
+    ? `${query.slice(0, TITLE_QUERY_MAX_CHARS)}…`
+    : query
   const out: WebSearchResult[] = []
   for (const block of blocks) {
     const text = block.type === "text" ? block.text?.trim() : ""
     if (!text) continue
     out.push({
-      title: `${server.name}/${server.toolName}`,
+      title: `${server.name}/${server.toolName}: ${shortQuery}`,
       url: "",
       snippet: text.length > SNIPPET_MAX_CHARS ? `${text.slice(0, SNIPPET_MAX_CHARS)}…` : text,
       source: `MCP:${server.name}`,
     })
   }
   return out
+}
+
+/** 网络类错误归一为友好文案（沿用 tauri-fetch 的跨平台判定，与兄弟集成一致）。 */
+function describeMcpError(err: unknown): string {
+  if (isFetchNetworkError(err)) {
+    return "网络请求失败：无法连接 MCP 端点，请确认 server 正在运行且 URL 正确"
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 function baseHeaders(server: McpServerConfig, sessionId: string | null): Record<string, string> {
@@ -186,7 +205,60 @@ async function openMcpSession(server: McpServerConfig, signal: AbortSignal): Pro
 }
 
 /**
- * 对单个 MCP server 执行一次检索调用。
+ * 对单个 MCP server 批量执行检索：一次会话（initialize/initialized）
+ * 复用于多个查询的 tools/call——S×Q 扇出下请求量从 3×S×Q 降为
+ * S×(2+Q)。批内单查询失败不中断其余查询。
+ *
+ * :param server: server 配置
+ * :param queries: 查询词列表
+ * :param timeoutMs: 整个批次会话的超时（默认 30 秒）
+ * :returns: { results: 全部成功查询的合并结果, errors: 带前缀的失败消息 }
+ */
+export async function callMcpToolBatch(
+  server: McpServerConfig,
+  queries: string[],
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<{ results: WebSearchResult[]; errors: string[] }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const results: WebSearchResult[] = []
+  const errors: string[] = []
+  try {
+    const session = await openMcpSession(server, controller.signal)
+    let requestId = 2
+    for (const query of queries) {
+      try {
+        const args = buildToolArguments(server, query)
+        const msg = await session.post(requestId++, "tools/call", {
+          name: server.toolName,
+          arguments: args,
+        })
+        if (!msg) throw new Error("响应中未找到 tools/call 结果")
+        if (msg.error) throw new Error(`tools/call: ${msg.error.message}`)
+        const result = (msg.result ?? {}) as { content?: McpContentBlock[]; isError?: boolean }
+        if (result.isError) {
+          const detail = (result.content ?? [])
+            .filter((b) => b.type === "text" && b.text)
+            .map((b) => b.text)
+            .join(" ")
+          throw new Error(detail || "工具返回 isError")
+        }
+        results.push(...mapMcpContent(server, result.content ?? [], query))
+      } catch (err) {
+        errors.push(`MCP ${server.name}: ${describeMcpError(err)}`)
+      }
+    }
+  } catch (err) {
+    // 会话建立失败：整批失败
+    errors.push(`MCP ${server.name}: ${describeMcpError(err)}`)
+  } finally {
+    clearTimeout(timer)
+  }
+  return { results, errors }
+}
+
+/**
+ * 对单个 MCP server 执行一次检索调用（单查询便捷封装）。
  *
  * :param server: server 配置
  * :param query: 查询词
@@ -199,29 +271,9 @@ export async function callMcpTool(
   query: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<WebSearchResult[]> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const args = buildToolArguments(server, query)
-    const session = await openMcpSession(server, controller.signal)
-    const msg = await session.post(2, "tools/call", { name: server.toolName, arguments: args })
-    if (!msg) throw new Error("响应中未找到 tools/call 结果")
-    if (msg.error) throw new Error(`tools/call: ${msg.error.message}`)
-    const result = (msg.result ?? {}) as { content?: McpContentBlock[]; isError?: boolean }
-    if (result.isError) {
-      const detail = (result.content ?? [])
-        .filter((b) => b.type === "text" && b.text)
-        .map((b) => b.text)
-        .join(" ")
-      throw new Error(detail || "工具返回 isError")
-    }
-    return mapMcpContent(server, result.content ?? [])
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    throw new Error(`MCP ${server.name}: ${message}`)
-  } finally {
-    clearTimeout(timer)
-  }
+  const { results, errors } = await callMcpToolBatch(server, [query], timeoutMs)
+  if (errors.length > 0) throw new Error(errors[0])
+  return results
 }
 
 /**

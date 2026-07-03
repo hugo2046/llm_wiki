@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   buildToolArguments,
   callMcpTool,
+  callMcpToolBatch,
   mapMcpContent,
   parseSseJsonRpcResponse,
   testMcpServer,
@@ -82,22 +83,27 @@ describe("parseSseJsonRpcResponse", () => {
 })
 
 describe("mapMcpContent", () => {
-  it("text block 映射为 WebSearchResult 并截断超长文本", () => {
+  it("text block 映射为 WebSearchResult 并截断超长文本；title 携带查询词", () => {
     const long = "甲".repeat(2500)
     const out = mapMcpContent(server, [
       { type: "text", text: "第一段" },
       { type: "image", text: "忽略" },
       { type: "text", text: long },
-    ])
+    ], "贵州茅台 财报")
     expect(out).toHaveLength(2)
     expect(out[0]).toEqual({
-      title: "tushare/stock_news",
+      title: "tushare/stock_news: 贵州茅台 财报",
       url: "",
       snippet: "第一段",
       source: "MCP:tushare",
     })
     expect(out[1].snippet.length).toBe(2001) // 2000 字符 + 省略号
     expect(out[1].snippet.endsWith("…")).toBe(true)
+  })
+
+  it("超长查询词在 title 中截断", () => {
+    const out = mapMcpContent(server, [{ type: "text", text: "x" }], "查".repeat(60))
+    expect(out[0].title).toBe(`tushare/stock_news: ${"查".repeat(40)}…`)
   })
 })
 
@@ -112,7 +118,7 @@ describe("callMcpTool", () => {
     const results = await callMcpTool(server, "贵州茅台 财报")
 
     expect(results).toEqual([{
-      title: "tushare/stock_news",
+      title: "tushare/stock_news: 贵州茅台 财报",
       url: "",
       snippet: "净利润同比 +12%",
       source: "MCP:tushare",
@@ -163,6 +169,78 @@ describe("callMcpTool", () => {
     fetchMock.mockReset()
     fetchMock.mockResolvedValueOnce(new Response("boom", { status: 500 }))
     await expect(callMcpTool(server, "q")).rejects.toThrow(/MCP tushare: .*500/)
+  })
+
+  it("网络类错误归一为友好文案", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    await expect(callMcpTool(server, "q")).rejects.toThrow(/MCP tushare: 网络请求失败：无法连接 MCP 端点/)
+  })
+})
+
+describe("callMcpToolBatch", () => {
+  it("多查询复用一次会话：initialize/initialized 各一次 + 每查询一次 tools/call", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(
+        { jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-03-26" } },
+        { "mcp-session-id": "sess-9" },
+      ))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({
+        jsonrpc: "2.0",
+        id: 2,
+        result: { content: [{ type: "text", text: "r1" }] },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        jsonrpc: "2.0",
+        id: 3,
+        result: { content: [{ type: "text", text: "r2" }] },
+      }))
+
+    const { results, errors } = await callMcpToolBatch(server, ["q1", "q2"])
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(errors).toEqual([])
+    expect(results.map((r) => r.snippet)).toEqual(["r1", "r2"])
+    expect(results.map((r) => r.title)).toEqual([
+      "tushare/stock_news: q1",
+      "tushare/stock_news: q2",
+    ])
+    // 第二次 tools/call 递增 id 且沿用 session 头
+    const secondCall = JSON.parse(fetchMock.mock.calls[3][1]?.body as string)
+    expect(secondCall.id).toBe(3)
+    expect((fetchMock.mock.calls[3][1]?.headers as Record<string, string>)["Mcp-Session-Id"]).toBe("sess-9")
+  })
+
+  it("批内单查询失败不中断其余查询，错误带前缀归集", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(
+        { jsonrpc: "2.0", id: 1, result: {} },
+        { "mcp-session-id": "sess-9" },
+      ))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(jsonResponse({
+        jsonrpc: "2.0",
+        id: 2,
+        error: { code: -32602, message: "unknown tool" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        jsonrpc: "2.0",
+        id: 3,
+        result: { content: [{ type: "text", text: "ok" }] },
+      }))
+
+    const { results, errors } = await callMcpToolBatch(server, ["bad", "good"])
+
+    expect(results).toHaveLength(1)
+    expect(results[0].snippet).toBe("ok")
+    expect(errors).toEqual(["MCP tushare: tools/call: unknown tool"])
+  })
+
+  it("会话建立失败时整批失败", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"))
+    const { results, errors } = await callMcpToolBatch(server, ["q1", "q2"])
+    expect(results).toEqual([])
+    expect(errors).toEqual(["MCP tushare: ECONNREFUSED"])
   })
 })
 
