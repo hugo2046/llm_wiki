@@ -9,8 +9,78 @@ import { normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+import { parseNormalizedFinanceName, type NormalizedFinanceName } from "./finance-naming"
 
 const MAX_RESEARCH_SOURCES = 20
+
+/** 本地来源超过该天数视为可能过期，上下文中显式标记。 */
+const STALE_SOURCE_DAYS = 180
+
+/** 金融模式追加到系统提示词 Time Sensitivity 段的指令。 */
+export const FINANCE_TIME_DIRECTIVES = [
+  "- Local sources (AnyTXT) carry a deterministic 日期 parsed from their normalized filenames; trust these dates over any dates appearing inside snippets.",
+  "- Organize the synthesis along the timeline (最新数据优先); when data points conflict, adopt the most recently dated source and note the older value it supersedes.",
+].join("\n")
+
+/** yyyymmdd → yyyy-mm-dd。 */
+function formatFinanceDate(yyyymmdd: string): string {
+  return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`
+}
+
+/** 两个 yyyy-mm-dd 日历日之间的天数（to - from）。 */
+function daysBetween(fromIso: string, toIso: string): number {
+  return Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86_400_000)
+}
+
+/**
+ * 金融模式的检索上下文构建：本地来源确定性解析日期/标的后按时间倒序
+ * 前置，未解析本地来源次之，web 结果保持原序在后；[N] 编号按最终顺序
+ * 重排，ordered 供 References 一节保持编号一致。
+ *
+ * :param results: 合并后的检索结果
+ * :param today: 今天（yyyy-mm-dd，currentWikiDate 产物）
+ * :returns: { context: 注入 LLM 的上下文, ordered: 重排后的结果 }
+ */
+export function buildFinanceSearchContext(
+  results: import("./web-search").WebSearchResult[],
+  today: string,
+): { context: string; ordered: import("./web-search").WebSearchResult[] } {
+  interface Annotated {
+    result: import("./web-search").WebSearchResult
+    parsed: NormalizedFinanceName | null
+  }
+  const dated: Annotated[] = []
+  const undatedLocal: Annotated[] = []
+  const rest: Annotated[] = []
+  for (const result of results) {
+    if (result.source !== "AnyTXT") {
+      rest.push({ result, parsed: null })
+      continue
+    }
+    const parsed = parseNormalizedFinanceName(result.title)
+    if (parsed) dated.push({ result, parsed })
+    else undatedLocal.push({ result, parsed: null })
+  }
+  // Array.sort 稳定：同日来源维持检索原序
+  dated.sort((a, b) => b.parsed!.date.localeCompare(a.parsed!.date))
+
+  const orderedAnnotated = [...dated, ...undatedLocal, ...rest]
+  const context = orderedAnnotated
+    .map((item, i) => {
+      const r = item.result
+      if (!item.parsed) return `[${i + 1}] **${r.title}** (${r.source})\n${r.snippet}`
+      const iso = formatFinanceDate(item.parsed.date)
+      const age = daysBetween(iso, today)
+      const target = item.parsed.tsCode
+        ? `, 标的: ${item.parsed.stockName} ${item.parsed.tsCode}`
+        : ""
+      const stale = age > STALE_SOURCE_DAYS ? " ⚠️ 数据时效存疑" : ""
+      return `[${i + 1}] **${r.title}** (${r.source}, 日期: ${iso}, 距今 ${age} 天${target})${stale}\n${r.snippet}`
+    })
+    .join("\n\n")
+
+  return { context, ordered: orderedAnnotated.map((a) => a.result) }
+}
 
 interface ResearchSourceDeps {
   webSearch: typeof webSearch

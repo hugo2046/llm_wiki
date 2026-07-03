@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { collectResearchSources, makeDeepResearchFileName, noResearchSourcesTaskPatch } from "./deep-research"
+import { collectResearchSources, makeDeepResearchFileName, noResearchSourcesTaskPatch, buildFinanceSearchContext } from "./deep-research"
 import type { SearchApiConfig } from "@/stores/wiki-store"
 import type { WebSearchResult } from "./web-search"
 
@@ -205,5 +205,55 @@ describe("collectResearchSources", () => {
     expect(out.results).toHaveLength(20)
     expect(infoSpy).toHaveBeenCalledTimes(1)
     infoSpy.mockRestore()
+  })
+})
+
+describe("buildFinanceSearchContext", () => {
+  const today = "2026-07-02"
+  const web: WebSearchResult = {
+    title: "Web",
+    url: "https://example.com/web",
+    snippet: "web snippet",
+    source: "example.com",
+  }
+  const localNew: WebSearchResult = {
+    title: "20260512-600519.SH-贵州茅台-一季报纪要.pdf",
+    url: "file:///C:/docs/a.pdf",
+    snippet: "茅台一季报",
+    source: "AnyTXT",
+  }
+  const localOld: WebSearchResult = {
+    title: "20251201-NA-行业峰会纪要.pdf",
+    url: "file:///C:/docs/b.pdf",
+    snippet: "峰会纪要",
+    source: "AnyTXT",
+  }
+  const localUnparsed: WebSearchResult = {
+    title: "random-notes.md",
+    url: "file:///C:/docs/c.md",
+    snippet: "随手记",
+    source: "AnyTXT",
+  }
+
+  it("有日期的本地来源按日期倒序在前，未解析本地次之，web 原序在后", () => {
+    const { ordered } = buildFinanceSearchContext([web, localOld, localNew, localUnparsed], today)
+    expect(ordered).toEqual([localNew, localOld, localUnparsed, web])
+  })
+
+  it("标注日期/距今天数/标的，编号按最终顺序重排", () => {
+    const { context } = buildFinanceSearchContext([web, localOld, localNew, localUnparsed], today)
+    const lines = context.split("\n\n")
+    expect(lines[0]).toBe(
+      "[1] **20260512-600519.SH-贵州茅台-一季报纪要.pdf** (AnyTXT, 日期: 2026-05-12, 距今 51 天, 标的: 贵州茅台 600519.SH)\n茅台一季报",
+    )
+    expect(lines[2]).toBe("[3] **random-notes.md** (AnyTXT)\n随手记")
+    expect(lines[3]).toBe("[4] **Web** (example.com)\nweb snippet")
+  })
+
+  it("超过 180 天的来源追加数据时效存疑标记", () => {
+    const { context } = buildFinanceSearchContext([localOld], today)
+    expect(context).toBe(
+      "[1] **20251201-NA-行业峰会纪要.pdf** (AnyTXT, 日期: 2025-12-01, 距今 213 天) ⚠️ 数据时效存疑\n峰会纪要",
+    )
   })
 })
