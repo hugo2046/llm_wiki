@@ -302,6 +302,9 @@ async function executeResearch(
           ordered: webResults,
         }
 
+    // 面板编号需与正文 [N]/References 对齐：金融模式下 orderedResults 已重排，回写任务以同步面板显示顺序
+    if (!updateTaskIfActive(pp, taskId, { webResults: orderedResults })) return
+
     // Read existing wiki index to enable cross-referencing
     let wikiIndex = ""
     try {
