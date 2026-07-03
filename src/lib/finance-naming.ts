@@ -231,6 +231,34 @@ export function buildFinanceFileName(
   }
 }
 
+export interface NormalizedFinanceName {
+  date: string
+  tsCode: string | null
+  stockName: string | null
+}
+
+/**
+ * 解析规范化金融文件名 `yyyymmdd-<ts_code|NA>-<简称>-<标题>.<ext>`。
+ *
+ * 只认本管线产出的严格形状（deep-research 用它确定性读取日期/标的），
+ * 认不出返回 null——非金融命名不硬猜。
+ *
+ * :param fileName: 待解析文件名
+ * :returns: { date: yyyymmdd, tsCode, stockName }；不符合形状为 null
+ */
+export function parseNormalizedFinanceName(fileName: string): NormalizedFinanceName | null {
+  const match = fileName.match(
+    /^(20\d{2})(\d{2})(\d{2})-(?:(\d{5,6}\.[A-Z]{2,4})-([^-]+?)|NA)(?:[-.]|$)/,
+  )
+  if (!match) return null
+  if (!isValidMonthDay(Number(match[2]), Number(match[3]))) return null
+  return {
+    date: `${match[1]}${match[2]}${match[3]}`,
+    tsCode: match[4] ?? null,
+    stockName: match[4] ? match[5] : null,
+  }
+}
+
 // ── IO 包装 ────────────────────────────────────────────────────────
 
 const NAMING_CONFIG_FILE = ".llm-wiki/source-naming.json"

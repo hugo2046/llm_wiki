@@ -4,6 +4,7 @@ import {
   extractSourceDate,
   matchStock,
   mergeStockRecords,
+  parseNormalizedFinanceName,
   parseStockBasicCsv,
   type StockRecord,
 } from "./finance-naming"
@@ -175,5 +176,42 @@ describe("buildFinanceFileName", () => {
     const { fileName, record } = buildFinanceFileName("600519调研纪要.docx", stocks, FALLBACK)
     expect(fileName).toBe("20260702-NA-600519调研纪要.docx")
     expect(record.dateSource).toBe("fallback")
+  })
+})
+
+describe("parseNormalizedFinanceName", () => {
+  it("解析 A 股规范化文件名", () => {
+    expect(parseNormalizedFinanceName("20260512-600519.SH-贵州茅台-一季报纪要.pdf")).toEqual({
+      date: "20260512",
+      tsCode: "600519.SH",
+      stockName: "贵州茅台",
+    })
+  })
+
+  it("解析港股规范化文件名（5 位代码）", () => {
+    expect(parseNormalizedFinanceName("20260415-00700.HK-腾讯控股-业绩会纪要.docx")).toEqual({
+      date: "20260415",
+      tsCode: "00700.HK",
+      stockName: "腾讯控股",
+    })
+  })
+
+  it("解析 NA 段（未匹配标的）", () => {
+    expect(parseNormalizedFinanceName("20260630-NA-稀美资源-小范围交流.pdf")).toEqual({
+      date: "20260630",
+      tsCode: null,
+      stockName: null,
+    })
+  })
+
+  it("拒绝非法月日", () => {
+    expect(parseNormalizedFinanceName("20261332-NA-乱写.pdf")).toBeNull()
+  })
+
+  it("拒绝非规范化文件名与 web 标题", () => {
+    expect(parseNormalizedFinanceName("研报总结.pdf")).toBeNull()
+    expect(parseNormalizedFinanceName("Anthropic raises new round")).toBeNull()
+    // 有日期但缺 ts_code/NA 段：不是本管线的产物，不认
+    expect(parseNormalizedFinanceName("20260630-稀美资源-小范围交流.pdf")).toBeNull()
   })
 })
