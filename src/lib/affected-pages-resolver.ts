@@ -179,3 +179,52 @@ export async function createPageResolver(projectPath: string): Promise<PageResol
     },
   }
 }
+
+/** 清单目录优先级：截断时先保留知识主体页，再保留其余目录。 */
+const INVENTORY_PRIORITY = ["wiki/entities/", "wiki/concepts/", "wiki/findings/", "wiki/thesis/"]
+
+function inventoryRank(relativePath: string): number {
+  const hit = INVENTORY_PRIORITY.findIndex((prefix) => relativePath.startsWith(prefix))
+  return hit >= 0 ? hit : INVENTORY_PRIORITY.length
+}
+
+/**
+ * 把真实页面路径清单格式化为提示词注入文本（纯函数）。
+ *
+ * 按目录优先级（entities/concepts/findings/thesis 优先）+ 字典序排序，
+ * 每行 `- <相对路径>`；超过 limit 截断并注明总数。
+ *
+ * :param relativePaths: wiki 相对路径列表
+ * :param limit: 上限条数（默认 500）
+ * :returns: 清单文本；空列表为空串
+ */
+export function formatWikiPageInventory(relativePaths: string[], limit = 500): string {
+  if (relativePaths.length === 0) return ""
+  const sorted = [...relativePaths].sort(
+    (a, b) => inventoryRank(a) - inventoryRank(b) || a.localeCompare(b),
+  )
+  const kept = sorted.slice(0, limit)
+  const lines = kept.map((p) => `- ${p}`)
+  if (sorted.length > limit) lines.push(`（清单已截断，共 ${sorted.length} 页）`)
+  return lines.join("\n")
+}
+
+/**
+ * 从磁盘构建项目的真实页面路径清单（供 REVIEW 提示词闭集约束）。
+ *
+ * :param projectPath: 项目根路径
+ * :returns: 清单文本；wiki 目录缺失或为空时为空串
+ */
+export async function buildWikiPageInventory(projectPath: string): Promise<string> {
+  const pp = normalizePath(projectPath)
+  try {
+    const files = flattenMdFiles(await listDirectory(`${pp}/wiki`))
+    const relativePaths = files.map((file) => {
+      const relative = getRelativePath(file.path, pp)
+      return relative.startsWith("wiki/") ? relative : `wiki/${file.name}`
+    })
+    return formatWikiPageInventory(relativePaths)
+  } catch {
+    return ""
+  }
+}

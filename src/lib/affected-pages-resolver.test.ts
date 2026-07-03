@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   buildPageResolutionIndex,
+  formatWikiPageInventory,
   resolveAffectedPages,
 } from "./affected-pages-resolver"
 
@@ -71,5 +72,39 @@ describe("resolveAffectedPages", () => {
       index,
     )
     expect(resolved).toEqual(["wiki/entities/openai.md"])
+  })
+})
+
+describe("formatWikiPageInventory", () => {
+  it("按优先目录排序并每行一条", () => {
+    const out = formatWikiPageInventory([
+      "wiki/queries/q1.md",
+      "wiki/entities/安泰科技-000969sz.md",
+      "wiki/concepts/大钨管.md",
+      "wiki/findings/f1.md",
+      "wiki/thesis/t1.md",
+    ])
+    const lines = out.split("\n")
+    expect(lines[0]).toBe("- wiki/entities/安泰科技-000969sz.md")
+    expect(lines[1]).toBe("- wiki/concepts/大钨管.md")
+    expect(lines[2]).toBe("- wiki/findings/f1.md")
+    expect(lines[3]).toBe("- wiki/thesis/t1.md")
+    expect(lines[4]).toBe("- wiki/queries/q1.md")
+  })
+
+  it("超限截断并注明总数，优先目录先保留", () => {
+    const paths = [
+      ...Array.from({ length: 3 }, (_, i) => `wiki/queries/q${i}.md`),
+      ...Array.from({ length: 3 }, (_, i) => `wiki/entities/e${i}.md`),
+    ]
+    const out = formatWikiPageInventory(paths, 4)
+    expect(out).toContain("- wiki/entities/e0.md")
+    expect(out).toContain("- wiki/entities/e2.md")
+    expect(out).not.toContain("q2.md")
+    expect(out).toContain("（清单已截断，共 6 页）")
+  })
+
+  it("空清单返回空串", () => {
+    expect(formatWikiPageInventory([])).toBe("")
   })
 })
