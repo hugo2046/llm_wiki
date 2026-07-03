@@ -22,7 +22,7 @@ import {
   sourceSummarySlugCandidatesFromIdentity,
   sourceSummarySlugFromIdentity,
 } from "@/lib/source-identity"
-import { createPageResolver } from "@/lib/affected-pages-resolver"
+import { buildWikiPageInventory, createPageResolver } from "@/lib/affected-pages-resolver"
 import { parseSources, writeSources } from "@/lib/sources-merge"
 import { checkIngestCache, saveIngestCache } from "@/lib/ingest-cache"
 import { sanitizeIngestedFileContent } from "@/lib/ingest-sanitize"
@@ -996,10 +996,13 @@ async function autoIngestImpl(
 
   let generation = ""
 
+  // REVIEW PAGES 闭集：注入磁盘真实页面清单，杜绝臆造 slug
+  const pageInventory = await buildWikiPageInventory(pp)
+
   await streamChat(
     llmConfig,
     [
-      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath) },
+      { role: "system", content: buildGenerationPrompt(schema, purpose, index, sourceIdentity, overview, sourceContext, sourceSummaryPath, pageInventory) },
       {
         role: "user",
         content: [
@@ -1063,6 +1066,7 @@ async function autoIngestImpl(
               sourceContext,
               generation,
               llmConfig.maxContextSize,
+              pageInventory,
             ),
           },
           {
@@ -2006,6 +2010,7 @@ export function buildGenerationPrompt(
   overview?: string,
   sourceContent: string = "",
   sourceSummaryPath?: string,
+  pageInventory?: string,
 ): string {
   // Use original filename (without extension) as the source summary page name
   const sourceBaseName = sourceFileName.replace(/\.[^.]+$/, "")
@@ -2143,7 +2148,16 @@ export function buildGenerationPrompt(
     "Description of what needs the user's attention.",
     "OPTIONS: Create Page | Skip",
     "PAGES: wiki/page1.md, wiki/page2.md",
-    "PAGES entries MUST be exact relative paths of wiki pages that exist in the CURRENT index above (copy the path verbatim, including non-ASCII filenames). NEVER translate, transliterate, or invent slugs.",
+    ...(pageInventory
+      ? [
+          "PAGES entries MUST be chosen ONLY from the \"Existing Wiki Pages\" list below, or be the exact relative path of a FILE block you emit in THIS response. Anything else will be dropped. NEVER translate, transliterate, or invent slugs.",
+          "",
+          "## Existing Wiki Pages (closed set for PAGES)",
+          pageInventory,
+        ]
+      : [
+          "PAGES entries MUST be the exact relative path of a FILE block you emit in THIS response. Anything else will be dropped.",
+        ]),
     "SEARCH: query 1 | query 2 | query 3",
     "---END REVIEW---",
     "```",
@@ -2177,6 +2191,7 @@ function buildReviewSuggestionPrompt(
   sourceContext: string,
   generation: string,
   maxContextSize: number | undefined,
+  pageInventory?: string,
 ): string {
   const { maxCtx } = computeContextBudget(maxContextSize)
   const sectionCap = Math.max(4_000, Math.floor(maxCtx * 0.15))
@@ -2206,7 +2221,16 @@ function buildReviewSuggestionPrompt(
     "Concise description of the gap and why it matters.",
     "OPTIONS: Create Page | Skip",
     "PAGES: wiki/page1.md, wiki/page2.md",
-    "PAGES entries MUST be exact relative paths of wiki pages that exist in the CURRENT index above (copy the path verbatim, including non-ASCII filenames). NEVER translate, transliterate, or invent slugs.",
+    ...(pageInventory
+      ? [
+          "PAGES entries MUST be chosen ONLY from the \"Existing Wiki Pages\" list below, or be an exact FILE path present in the generation output above. Anything else will be dropped. NEVER translate, transliterate, or invent slugs.",
+          "",
+          "## Existing Wiki Pages (closed set for PAGES)",
+          pageInventory,
+        ]
+      : [
+          "PAGES entries MUST be an exact FILE path present in the generation output above. Anything else will be dropped.",
+        ]),
     "SEARCH: query 1 | query 2 | query 3",
     "---END REVIEW---",
     "```",

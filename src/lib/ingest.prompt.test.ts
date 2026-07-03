@@ -239,3 +239,22 @@ describe("long-source ingest planning", () => {
     expect(chunks[1].main.startsWith(chunks[0].main.slice(-200))).toBe(false)
   })
 })
+
+describe("REVIEW PAGES 闭集约束", () => {
+  const inventory = "- wiki/entities/安泰科技-000969sz.md\n- wiki/concepts/大钨管.md"
+
+  it("注入清单段与闭集指令（generation prompt）", () => {
+    const prompt = buildGenerationPrompt("", "", "", "s.pdf", undefined, "", undefined, inventory)
+    expect(prompt).toContain("## Existing Wiki Pages")
+    expect(prompt).toContain("- wiki/entities/安泰科技-000969sz.md")
+    expect(prompt).toContain("chosen ONLY from the \"Existing Wiki Pages\" list")
+    expect(prompt).toContain("or be the exact relative path of a FILE block you emit in THIS response")
+    expect(prompt).not.toContain("exist in the CURRENT index above")
+  })
+
+  it("空清单省略清单段，指令退化为仅允许本响应 FILE 路径", () => {
+    const prompt = buildGenerationPrompt("", "", "", "s.pdf")
+    expect(prompt).not.toContain("## Existing Wiki Pages")
+    expect(prompt).toContain("PAGES entries MUST be the exact relative path of a FILE block you emit in THIS response")
+  })
+})
