@@ -67,6 +67,29 @@ describe("appendProjectLog", () => {
     expect(fsMock.writeFile).not.toHaveBeenCalled()
   })
 
+  it("同一日志文件的并发追加串行化，不丢条目（读-改-写竞争）", async () => {
+    // 模拟慢读+慢写：无串行化时第二次读发生在第一次写落盘前，
+    // 双方基于同一份旧内容构造，后写覆盖先写（丢失更新）
+    let stored = ""
+    fsMock.readFile.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      if (!stored) throw new Error("ENOENT")
+      return stored
+    })
+    fsMock.writeFile.mockImplementation(async (_path, content) => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      stored = content
+    })
+
+    await Promise.all([
+      appendProjectLog("C:/proj", "deep-research", ["完成: 任务A"]),
+      appendProjectLog("C:/proj", "deep-research", ["完成: 任务B"]),
+    ])
+
+    expect(stored).toContain("任务A")
+    expect(stored).toContain("任务B")
+  })
+
   it("文件不存在时从空开始；写失败不抛出", async () => {
     fsMock.readFile.mockRejectedValue(new Error("ENOENT"))
     await appendProjectLog("C:/proj", "ingest", ["硬失败: a.md"])

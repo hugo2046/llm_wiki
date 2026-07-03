@@ -59,8 +59,14 @@ export function trimProjectLog(
   return `${ROTATION_NOTICE}\n\n${entries.slice(start).join("\n\n")}`
 }
 
+/** 每个日志文件一条进程内串行链：并发追加排队执行，杜绝读-改-写丢失更新。 */
+const appendChains = new Map<string, Promise<void>>()
+
 /**
  * 追加一批日志行到项目 `.llm-wiki/app.log`；任何失败只 console.warn。
+ *
+ * 同一日志文件的并发调用按到达顺序串行化（进程内 promise 链），
+ * 避免读-改-写竞争导致后写覆盖先写。
  *
  * :param projectPath: 项目根路径
  * :param scope: 事件域
@@ -74,6 +80,19 @@ export async function appendProjectLog(
   if (lines.length === 0) return
   const pp = normalizePath(projectPath)
   const logPath = `${pp}/.llm-wiki/app.log`
+  const prev = appendChains.get(logPath) ?? Promise.resolve()
+  // doAppend 吞掉所有错误，链条永不携带 rejection
+  const next = prev.then(() => doAppend(pp, logPath, scope, lines))
+  appendChains.set(logPath, next)
+  await next
+}
+
+async function doAppend(
+  pp: string,
+  logPath: string,
+  scope: string,
+  lines: readonly string[],
+): Promise<void> {
   try {
     await createDirectory(`${pp}/.llm-wiki`)
     let existing = ""
