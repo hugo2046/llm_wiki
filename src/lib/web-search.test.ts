@@ -602,6 +602,35 @@ describe("webSearch", () => {
     }).deepResearchSource).toBe("web")
   })
 
+  it("treats an enabled MCP server as a configured Deep Research source (MCP-only setup)", () => {
+    const mcpServer = {
+      id: "s1",
+      name: "tushare",
+      url: "http://127.0.0.1:8000/mcp",
+      toolName: "stock_news",
+      queryParam: "query",
+      enabled: true,
+    }
+    // 仅配置 MCP、无 web/anytxt：应可启动研究（与 collectResearchSources 的参战条件一致）
+    expect(hasConfiguredDeepResearchSources({
+      provider: "none",
+      apiKey: "",
+      deepResearchSource: "web",
+      mcpServers: [mcpServer],
+    })).toBe(true)
+
+    // 禁用或配置不全的 server 不算
+    expect(hasConfiguredDeepResearchSources({
+      provider: "none",
+      apiKey: "",
+      mcpServers: [
+        { ...mcpServer, enabled: false },
+        { ...mcpServer, id: "s2", url: " " },
+        { ...mcpServer, id: "s3", toolName: "" },
+      ],
+    })).toBe(false)
+  })
+
   it("calls the Ollama Web Search API with Bearer auth", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       results: [

@@ -125,6 +125,12 @@ export function hasConfiguredDeepResearchSources(config: SearchApiConfig): boole
   const source = resolved.deepResearchSource ?? "web"
   const webConfigured = hasConfiguredSearchProvider(resolved)
   const anyTxtConfigured = hasConfiguredAnyTxt(resolved.anyTxt)
+  // MCP 数据源不受来源模式三选一影响，启用且配置完整即参战——
+  // 判定条件须与 collectResearchSources 的过滤保持一致
+  const mcpConfigured = (resolved.mcpServers ?? []).some(
+    (s) => s.enabled && s.url.trim() && s.toolName.trim(),
+  )
+  if (mcpConfigured) return true
 
   if (source === "web") return webConfigured
   if (source === "anytxt") return anyTxtConfigured
