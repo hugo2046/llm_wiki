@@ -2150,13 +2150,13 @@ export function buildGenerationPrompt(
     "PAGES: wiki/page1.md, wiki/page2.md",
     ...(pageInventory
       ? [
-          "PAGES entries MUST be chosen ONLY from the \"Existing Wiki Pages\" list below, or be the exact relative path of a FILE block you emit in THIS response. Anything else will be dropped. NEVER translate, transliterate, or invent slugs.",
+          "PAGES entries MUST be exact relative paths of REAL wiki pages: copy them from the \"Existing Wiki Pages\" list below or from a FILE block you emit in THIS response. Exact paths of other existing pages (the list may be truncated) are also accepted, but NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
           "",
           "## Existing Wiki Pages (closed set for PAGES)",
           pageInventory,
         ]
       : [
-          "PAGES entries MUST be the exact relative path of a FILE block you emit in THIS response. Anything else will be dropped.",
+          "PAGES entries MUST be exact relative paths of existing wiki pages or of FILE blocks you emit in THIS response. NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
         ]),
     "SEARCH: query 1 | query 2 | query 3",
     "---END REVIEW---",
@@ -2223,13 +2223,13 @@ function buildReviewSuggestionPrompt(
     "PAGES: wiki/page1.md, wiki/page2.md",
     ...(pageInventory
       ? [
-          "PAGES entries MUST be chosen ONLY from the \"Existing Wiki Pages\" list below, or be an exact FILE path present in the generation output above. Anything else will be dropped. NEVER translate, transliterate, or invent slugs.",
+          "PAGES entries MUST be exact relative paths of REAL wiki pages: copy them from the \"Existing Wiki Pages\" list below or from FILE paths emitted during generation (the excerpt above may be truncated — any exact FILE path from this ingest is valid). Exact paths of other existing pages are also accepted, but NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
           "",
           "## Existing Wiki Pages (closed set for PAGES)",
           pageInventory,
         ]
       : [
-          "PAGES entries MUST be an exact FILE path present in the generation output above. Anything else will be dropped.",
+          "PAGES entries MUST be exact relative paths of existing wiki pages or of FILE paths emitted during generation. NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
         ]),
     "SEARCH: query 1 | query 2 | query 3",
     "---END REVIEW---",

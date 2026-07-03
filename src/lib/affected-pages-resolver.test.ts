@@ -104,6 +104,14 @@ describe("formatWikiPageInventory", () => {
     expect(out).toContain("（清单已截断，共 6 页）")
   })
 
+  it("字符预算触发截断（条数未满也截）", () => {
+    const paths = Array.from({ length: 10 }, (_, i) => `wiki/entities/很长的中文实体页面名称示例-${i}.md`)
+    const lineLength = `- ${paths[0]}\n`.length
+    const out = formatWikiPageInventory(paths, 500, lineLength * 3)
+    expect(out.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(3)
+    expect(out).toContain("（清单已截断，共 10 页）")
+  })
+
   it("空清单返回空串", () => {
     expect(formatWikiPageInventory([])).toBe("")
   })

@@ -247,14 +247,17 @@ describe("REVIEW PAGES 闭集约束", () => {
     const prompt = buildGenerationPrompt("", "", "", "s.pdf", undefined, "", undefined, inventory)
     expect(prompt).toContain("## Existing Wiki Pages")
     expect(prompt).toContain("- wiki/entities/安泰科技-000969sz.md")
-    expect(prompt).toContain("chosen ONLY from the \"Existing Wiki Pages\" list")
-    expect(prompt).toContain("or be the exact relative path of a FILE block you emit in THIS response")
+    expect(prompt).toContain("copy them from the \"Existing Wiki Pages\" list below")
+    expect(prompt).toContain("from a FILE block you emit in THIS response")
+    // 清单可能截断：真实存量页的确切路径仍被接受，臆造仍被丢弃
+    expect(prompt).toContain("the list may be truncated")
+    expect(prompt).toContain("unresolvable paths will be dropped")
     expect(prompt).not.toContain("exist in the CURRENT index above")
   })
 
-  it("空清单省略清单段，指令退化为仅允许本响应 FILE 路径", () => {
+  it("空清单省略清单段，指令退化为存量页或本响应 FILE 路径", () => {
     const prompt = buildGenerationPrompt("", "", "", "s.pdf")
     expect(prompt).not.toContain("## Existing Wiki Pages")
-    expect(prompt).toContain("PAGES entries MUST be the exact relative path of a FILE block you emit in THIS response")
+    expect(prompt).toContain("PAGES entries MUST be exact relative paths of existing wiki pages or of FILE blocks you emit in THIS response")
   })
 })

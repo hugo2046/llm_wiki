@@ -192,20 +192,33 @@ function inventoryRank(relativePath: string): number {
  * 把真实页面路径清单格式化为提示词注入文本（纯函数）。
  *
  * 按目录优先级（entities/concepts/findings/thesis 优先）+ 字典序排序，
- * 每行 `- <相对路径>`；超过 limit 截断并注明总数。
+ * 每行 `- <相对路径>`；超过条数或字符预算即截断并注明总数。
  *
  * :param relativePaths: wiki 相对路径列表
  * :param limit: 上限条数（默认 500）
+ * :param maxChars: 字符预算（默认 20000，防止长路径清单顶爆小上下文模型）
  * :returns: 清单文本；空列表为空串
  */
-export function formatWikiPageInventory(relativePaths: string[], limit = 500): string {
+export function formatWikiPageInventory(
+  relativePaths: string[],
+  limit = 500,
+  maxChars = 20_000,
+): string {
   if (relativePaths.length === 0) return ""
   const sorted = [...relativePaths].sort(
     (a, b) => inventoryRank(a) - inventoryRank(b) || a.localeCompare(b),
   )
-  const kept = sorted.slice(0, limit)
-  const lines = kept.map((p) => `- ${p}`)
-  if (sorted.length > limit) lines.push(`（清单已截断，共 ${sorted.length} 页）`)
+  // 条数与字符双预算
+  const lines: string[] = []
+  let chars = 0
+  for (const path of sorted) {
+    if (lines.length >= limit) break
+    const line = `- ${path}`
+    if (chars + line.length + 1 > maxChars) break
+    lines.push(line)
+    chars += line.length + 1
+  }
+  if (lines.length < sorted.length) lines.push(`（清单已截断，共 ${sorted.length} 页）`)
   return lines.join("\n")
 }
 
