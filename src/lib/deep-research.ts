@@ -9,7 +9,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
-import { parseNormalizedFinanceName, type NormalizedFinanceName } from "./finance-naming"
+import { isFinanceNamingEnabled, parseNormalizedFinanceName, type NormalizedFinanceName } from "./finance-naming"
 
 const MAX_RESEARCH_SOURCES = 20
 
@@ -290,9 +290,17 @@ async function executeResearch(
     // Step 2: LLM synthesis
     if (!updateTaskIfActive(pp, taskId, { status: "synthesizing" })) return
 
-    const searchContext = webResults
-      .map((r, i) => `[${i + 1}] **${r.title}** (${r.source})\n${r.snippet}`)
-      .join("\n\n")
+    // 金融模式：确定性消费规范化文件名中的日期/标的（仅金融项目生效）
+    const today = currentWikiDate()
+    const financeMode = await isFinanceNamingEnabled(pp)
+    const { context: searchContext, ordered: orderedResults } = financeMode
+      ? buildFinanceSearchContext(webResults, today)
+      : {
+          context: webResults
+            .map((r, i) => `[${i + 1}] **${r.title}** (${r.source})\n${r.snippet}`)
+            .join("\n\n"),
+          ordered: webResults,
+        }
 
     // Read existing wiki index to enable cross-referencing
     let wikiIndex = ""
@@ -302,7 +310,6 @@ async function executeResearch(
       // no index yet
     }
 
-    const today = currentWikiDate()
     const systemPrompt = [
       "You are a research assistant. Synthesize the collected research sources into a comprehensive wiki page.",
       "",
@@ -313,6 +320,7 @@ async function executeResearch(
       "- When a source snippet reveals its publication date, carry it inline next to the claim, e.g. (2026-06).",
       "- When sources conflict, prefer the most recent one and say so.",
       "- Explicitly flag data points that are older than ~6 months or undated as potentially stale (数据时效存疑) instead of presenting them as current facts.",
+      ...(financeMode ? [FINANCE_TIME_DIRECTIVES] : []),
       "",
       "## Cross-referencing (IMPORTANT)",
       "- The wiki already has existing pages listed in the Wiki Index below.",
@@ -369,7 +377,7 @@ async function executeResearch(
     const { fileName, date } = makeDeepResearchFileName(topic)
     const filePath = `${pp}/wiki/queries/${fileName}`
 
-    const references = webResults
+    const references = orderedResults
       .map((r, i) => `${i + 1}. [${r.title}](${r.url}) — ${r.source}`)
       .join("\n")
 
