@@ -12,6 +12,7 @@ import {
   type SearchProviderOverride,
 } from "@/stores/wiki-store"
 import { normalizeAnyTxtConfig } from "@/lib/anytxt-search"
+import { testMcpServer, type McpServerConfig } from "@/lib/mcp-search"
 import {
   SEARXNG_CATEGORY_OPTIONS,
   SERPAPI_ENGINE_OPTIONS,
@@ -155,6 +156,66 @@ export function WebSearchSection() {
     setTimeout(() => setSavedId((cur) => (cur === "anytxt" ? null : cur)), 1500)
   }
 
+  const mcpServers = resolvedConfig.mcpServers ?? []
+
+  function updateMcpServers(next: McpServerConfig[]) {
+    persist(resolveSearchConfig({ ...resolvedConfig, mcpServers: next })).catch(() => {})
+    setSavedId("mcp")
+    setTimeout(() => setSavedId((cur) => (cur === "mcp" ? null : cur)), 1500)
+  }
+
+  function addMcpServer() {
+    const id = crypto.randomUUID()
+    updateMcpServers([
+      ...mcpServers,
+      { id, name: "", url: "", toolName: "", queryParam: "query", extraArgs: "", enabled: false },
+    ])
+    setExpanded((prev) => ({ ...prev, [`mcp-${id}`]: true }))
+  }
+
+  function patchMcpServer(id: string, patch: Partial<McpServerConfig>) {
+    updateMcpServers(mcpServers.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+  }
+
+  function removeMcpServer(id: string) {
+    updateMcpServers(mcpServers.filter((s) => s.id !== id))
+  }
+
+  /** extraArgs 是否为合法 JSON 对象（空串视为合法）。 */
+  function isValidExtraArgs(raw: string | undefined): boolean {
+    const trimmed = raw?.trim()
+    if (!trimmed) return true
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      return !!parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    } catch {
+      return false
+    }
+  }
+
+  async function testMcp(server: McpServerConfig) {
+    const key = `mcp-${server.id}`
+    const runId = (testRunRef.current[key] ?? 0) + 1
+    testRunRef.current[key] = runId
+    setTestStatus((prev) => ({
+      ...prev,
+      [key]: { state: "testing", message: t("settings.sections.webSearch.testRunning") },
+    }))
+    const result = await testMcpServer(server)
+    if (testRunRef.current[key] !== runId) return
+    setTestStatus((prev) => ({
+      ...prev,
+      [key]: result.ok
+        ? {
+            state: result.hasTool ? "ok" : "warning",
+            message: result.hasTool
+              ? t("settings.sections.webSearch.mcpTestOk", { count: result.toolCount, tool: server.toolName })
+              : t("settings.sections.webSearch.mcpTestNoTool", { count: result.toolCount, tool: server.toolName }),
+          }
+        : { state: "error", message: result.error ?? "error" },
+    }))
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -277,6 +338,174 @@ export function WebSearchSection() {
         </div>
         <p className="text-xs text-muted-foreground">
           {t("settings.sections.webSearch.anyTxtHint")}
+        </p>
+      </div>
+
+      <div className="space-y-3 rounded-lg border p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Label>{t("settings.sections.webSearch.mcpTitle")}</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("settings.sections.webSearch.mcpDescription")}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {savedId === "mcp" && (
+              <span className="text-[10px] text-emerald-600">
+                {t("settings.sections.webSearch.savedBadge")}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={addMcpServer}
+              className="rounded-md border px-2 py-1 text-xs hover:bg-accent"
+            >
+              {t("settings.sections.webSearch.mcpAddServer")}
+            </button>
+          </div>
+        </div>
+        {mcpServers.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            {t("settings.sections.webSearch.mcpEmpty")}
+          </p>
+        )}
+        {mcpServers.map((server) => {
+          const key = `mcp-${server.id}`
+          const isExpanded = !!expanded[key]
+          const status = testStatus[key]
+          return (
+            <div key={server.id} className={`rounded-lg border ${server.enabled ? "border-primary/60 bg-primary/5" : "border-border"}`}>
+              <div className="flex items-center justify-between gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  onClick={() => setExpanded((prev) => ({ ...prev, [key]: !isExpanded }))}
+                >
+                  {isExpanded ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                  <span className="truncate text-sm">
+                    {server.name || server.url || t("settings.sections.webSearch.mcpName")}
+                  </span>
+                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {server.enabled && (
+                    <span className="rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                      {t("settings.sections.webSearch.activeBadge")}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => patchMcpServer(server.id, { enabled: !server.enabled })}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
+                      server.enabled
+                        ? "border-primary bg-primary"
+                        : "border-muted-foreground/30 bg-muted-foreground/20 hover:bg-muted-foreground/30"
+                    }`}
+                    aria-label={server.enabled ? t("settings.sections.webSearch.deactivate") : t("settings.sections.webSearch.activate")}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm ring-1 ring-black/10 transition-transform ${
+                        server.enabled ? "translate-x-4" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+              {isExpanded && (
+                <div className="space-y-3 border-t px-3 py-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpName")}</Label>
+                      <Input
+                        value={server.name}
+                        onChange={(e) => patchMcpServer(server.id, { name: e.target.value })}
+                        placeholder="tushare"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpUrl")}</Label>
+                      <Input
+                        value={server.url}
+                        onChange={(e) => patchMcpServer(server.id, { url: e.target.value })}
+                        placeholder="http://127.0.0.1:8000/mcp"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpToolName")}</Label>
+                      <Input
+                        value={server.toolName}
+                        onChange={(e) => patchMcpServer(server.id, { toolName: e.target.value })}
+                        placeholder="stock_news"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpQueryParam")}</Label>
+                      <Input
+                        value={server.queryParam}
+                        onChange={(e) => patchMcpServer(server.id, { queryParam: e.target.value })}
+                        placeholder="query"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpAuthHeader")}</Label>
+                      <Input
+                        type="password"
+                        value={server.authHeader ?? ""}
+                        onChange={(e) => patchMcpServer(server.id, { authHeader: e.target.value })}
+                        placeholder="Bearer …"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t("settings.sections.webSearch.mcpExtraArgs")}</Label>
+                      <Input
+                        value={server.extraArgs ?? ""}
+                        onChange={(e) => patchMcpServer(server.id, { extraArgs: e.target.value })}
+                        placeholder='{"limit": 10}'
+                      />
+                      {!isValidExtraArgs(server.extraArgs) && (
+                        <p className="text-xs text-destructive">
+                          {t("settings.sections.webSearch.mcpExtraArgsInvalid")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => testMcp(server)}
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-accent"
+                    >
+                      {t("settings.sections.webSearch.mcpTestConnection")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeMcpServer(server.id)}
+                      className="rounded-md border border-destructive/40 px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                    >
+                      {t("settings.sections.webSearch.mcpRemove")}
+                    </button>
+                    {status && (
+                      <span
+                        className={`text-xs ${
+                          status.state === "ok"
+                            ? "text-emerald-600"
+                            : status.state === "warning"
+                              ? "text-amber-600"
+                              : status.state === "error"
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                        }`}
+                      >
+                        {status.message}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+        <p className="text-xs text-muted-foreground">
+          {t("settings.sections.webSearch.mcpHint")}
         </p>
       </div>
 
