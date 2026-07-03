@@ -301,8 +301,10 @@ export interface NormalizedFinanceName {
  * :returns: { date: yyyymmdd, tsCode, stockName }；不符合形状为 null
  */
 export function parseNormalizedFinanceName(fileName: string): NormalizedFinanceName | null {
+  // 股名段优先尝试带连字符市场标记的形态（寒武纪-U / 京东集团-SW），
+  // 再退普通名——标题以短横相接时不会被误并入（标记限 1-3 位大写字母）
   const match = fileName.match(
-    /^(20\d{2})(\d{2})(\d{2})-(?:(\d{5,6}\.[A-Z]{2,4})-([^-]+?)|NA)(?:[-.]|$)/,
+    /^(20\d{2})(\d{2})(\d{2})-(?:(\d{5,6}\.[A-Z]{2,4})-([^-]+?-[A-Z]{1,3}|[^-]+?)|NA)(?:[-.]|$)/,
   )
   if (!match) return null
   if (!isValidMonthDay(Number(match[2]), Number(match[3]))) return null

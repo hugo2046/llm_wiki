@@ -291,6 +291,21 @@ describe("parseNormalizedFinanceName", () => {
     })
   })
 
+  it("保留股名中的连字符市场标记（寒武纪-U 不被截断为 寒武纪）", () => {
+    // buildFinanceFileName 会把 stock.name 原样写入文件名，回解析须完整还原
+    expect(parseNormalizedFinanceName("20260701-688256.SH-寒武纪-U-三季报交流.docx")).toEqual({
+      date: "20260701",
+      tsCode: "688256.SH",
+      stockName: "寒武纪-U",
+    })
+    // 无标记的普通名不受影响：标题以短横相接不误并入
+    expect(parseNormalizedFinanceName("20260702-000725.SZ-京东方A-AI布局分析.docx")).toEqual({
+      date: "20260702",
+      tsCode: "000725.SZ",
+      stockName: "京东方A",
+    })
+  })
+
   it("拒绝非法月日", () => {
     expect(parseNormalizedFinanceName("20261332-NA-乱写.pdf")).toBeNull()
   })
