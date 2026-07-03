@@ -42,6 +42,7 @@ import type { MultimodalConfig } from "@/stores/wiki-store"
 import { GENERATION_WIKI_TYPES } from "@/lib/wiki-page-types"
 import { computeContextBudget } from "@/lib/context-budget"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
+import { appendProjectLog } from "@/lib/project-log"
 
 const LONG_SOURCE_MIN_BUDGET = 8_000
 const LONG_SOURCE_MAX_SINGLE_PASS_BUDGET = 300_000
@@ -1304,6 +1305,10 @@ async function autoIngestImpl(
     console.warn(
       `[ingest] Skipping cache save for "${sourceIdentity}" — ${hardFailures.length} block(s) failed to write: ${hardFailures.join(", ")}`,
     )
+    void appendProjectLog(pp, "ingest", [
+      `${sourceIdentity}: ${hardFailures.length} 个块写入失败（本次结果未入缓存）`,
+      ...hardFailures,
+    ])
   }
 
   // ── Step 6: Generate embeddings (if enabled) ───────────────

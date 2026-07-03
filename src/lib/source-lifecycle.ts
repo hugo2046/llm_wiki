@@ -46,6 +46,7 @@ import { isPathAllowedBySourceWatch, normalizeSourceWatchConfig } from "@/lib/so
 import { isSensitiveConfigSourceFile } from "@/lib/source-filter"
 import { naturalCompare } from "@/lib/natural-sort"
 import type { SourceWatchConfig } from "@/stores/wiki-store"
+import { appendProjectLog } from "@/lib/project-log"
 
 export const INGESTABLE_SOURCE_EXTENSIONS = new Set([
   "md",
@@ -224,6 +225,12 @@ export async function importSourceFiles(
   }
 
   await appendRenameMap(pp, renameRecords)
+  if (renameRecords.length > 0) {
+    const naCount = renameRecords.filter((r) => !r.tsCode).length
+    void appendProjectLog(pp, "finance-import", [
+      `本批规范化 ${renameRecords.length} 个文件，未匹配标的(NA) ${naCount} 个`,
+    ])
+  }
   await enqueueSourceIngest(project, importedPaths, llmConfig)
 
   return importedPaths
@@ -308,6 +315,12 @@ export async function importSourceFolder(
   }
 
   await appendRenameMap(pp, renameRecords)
+  if (renameRecords.length > 0) {
+    const naCount = renameRecords.filter((r) => !r.tsCode).length
+    void appendProjectLog(pp, "finance-import", [
+      `本批规范化 ${renameRecords.length} 个文件，未匹配标的(NA) ${naCount} 个`,
+    ])
+  }
 
   const naturallyOrderedFiles = [...allowedFiles].sort((a, b) =>
     naturalCompare(getRelativePath(a, destDir), getRelativePath(b, destDir)),

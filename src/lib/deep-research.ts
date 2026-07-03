@@ -11,6 +11,7 @@ import { buildLanguageDirective } from "@/lib/output-language"
 import { makeQueryFileName } from "@/lib/wiki-filename"
 import { refreshProjectFileTree } from "@/lib/project-file-tree-refresh"
 import { isFinanceNamingEnabled, parseNormalizedFinanceName, type NormalizedFinanceName } from "./finance-naming"
+import { appendProjectLog } from "./project-log"
 
 const MAX_RESEARCH_SOURCES = 20
 
@@ -297,6 +298,10 @@ async function executeResearch(
 
     if (webResults.length === 0) {
       if (!updateTaskIfActive(pp, taskId, noResearchSourcesTaskPatch(sourceErrors))) return
+      void appendProjectLog(pp, "deep-research", [
+        `零来源结束: ${topic}`,
+        ...sourceErrors,
+      ])
       if (isActiveProjectPath(pp)) onTaskFinished(pp, llmConfig, searchConfig)
       return
     }
@@ -431,6 +436,12 @@ async function executeResearch(
       savedPath,
     })) return
 
+    void appendProjectLog(pp, "deep-research", [
+      `完成: ${topic}`,
+      `来源 ${orderedResults.length} 条，保存 ${savedPath}`,
+      ...sourceErrors.map((e) => `部分来源失败: ${e}`),
+    ])
+
     try {
       await refreshProjectFileTree(pp, { bumpDataVersion: true })
     } catch {
@@ -449,6 +460,7 @@ async function executeResearch(
       status: "error",
       error: message,
     })
+    void appendProjectLog(pp, "deep-research", [`失败: ${topic}`, message])
   }
 
   if (isActiveProjectPath(pp)) onTaskFinished(pp, llmConfig, searchConfig)
