@@ -306,6 +306,15 @@ describe("parseNormalizedFinanceName", () => {
     })
   })
 
+  it("纯大写短标题不被误吞为市场标记（-AI/-ESG 是标题不是后缀）", () => {
+    // 标记仅认枚举集 U/W/B/S/UW/WD/SW；AI/ESG/ROE 类缩写标题保持在标题段
+    expect(parseNormalizedFinanceName("20260701-688256.SH-寒武纪-AI.pdf")?.stockName).toBe("寒武纪")
+    expect(parseNormalizedFinanceName("20260701-000001.SZ-平安银行-ESG.pdf")?.stockName).toBe("平安银行")
+    expect(parseNormalizedFinanceName("20260703-000001.SZ-小米-AI-战略解读.pdf")?.stockName).toBe("小米")
+    // 真标记后无标题（直接接扩展名）仍完整保留
+    expect(parseNormalizedFinanceName("20260701-03690.HK-美团-W.pdf")?.stockName).toBe("美团-W")
+  })
+
   it("拒绝非法月日", () => {
     expect(parseNormalizedFinanceName("20261332-NA-乱写.pdf")).toBeNull()
   })

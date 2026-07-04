@@ -149,17 +149,25 @@ function normalizeForMatch(text: string): string {
 }
 
 /**
+ * 连字符市场标记的枚举集（tushare A股/港股命名）：
+ * -U 未盈利、-W 同股不同权、-B 生科、-S 第二上市、-UW/-WD/-SW 组合。
+ * 匹配端（stripStockMarkers）与解析端（parseNormalizedFinanceName）共用
+ * 此常量，两处规则不再各自漂移；长标记在前保证正确择优。
+ */
+const HYPHEN_MARKET_TAG = "(?:UW|WD|SW|U|W|B|S)"
+
+/**
  * 剥除股票名中的市场标记，得到主体基名（输入须已归一化）。
  *
  * 前缀：ST/*ST/SST/S*ST（风险警示）、S（未股改，后随非拉丁字母，
- * 避免误伤 SOHO 中国类英文名）；后缀：连字符标记 -U/-W/-UW/-WD/-SW 等
- * （统一按 -大写字母段 剥除）、裸 A/B（深市老 A/B 股类别）。
+ * 避免误伤 SOHO 中国类英文名）；后缀：连字符标记（HYPHEN_MARKET_TAG
+ * 枚举集）、裸 A/B（深市老 A/B 股类别）。
  */
 function stripStockMarkers(name: string): string {
   return name
     .replace(/^S?\*?ST/, "")
     .replace(/^S(?![A-Z])/, "")
-    .replace(/-[A-Z]{1,3}$/, "")
+    .replace(new RegExp(`-${HYPHEN_MARKET_TAG}$`), "")
     .replace(/[AB]$/, "")
 }
 
@@ -302,10 +310,11 @@ export interface NormalizedFinanceName {
  */
 export function parseNormalizedFinanceName(fileName: string): NormalizedFinanceName | null {
   // 股名段优先尝试带连字符市场标记的形态（寒武纪-U / 京东集团-SW），
-  // 再退普通名——标题以短横相接时不会被误并入（标记限 1-3 位大写字母）
-  const match = fileName.match(
-    /^(20\d{2})(\d{2})(\d{2})-(?:(\d{5,6}\.[A-Z]{2,4})-([^-]+?-[A-Z]{1,3}|[^-]+?)|NA)(?:[-.]|$)/,
-  )
+  // 再退普通名。标记仅认 HYPHEN_MARKET_TAG 枚举集——纯大写短标题
+  // （-AI/-ESG/-ROE 等）不在集合内，不会被误吞进股名
+  const match = fileName.match(new RegExp(
+    `^(20\\d{2})(\\d{2})(\\d{2})-(?:(\\d{5,6}\\.[A-Z]{2,4})-([^-]+?-${HYPHEN_MARKET_TAG}(?=[-.])|[^-]+?)|NA)(?:[-.]|$)`,
+  ))
   if (!match) return null
   if (!isValidMonthDay(Number(match[2]), Number(match[3]))) return null
   return {

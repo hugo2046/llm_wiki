@@ -181,7 +181,9 @@ export async function collectResearchSources(
         }
         return
       }
-      const key = (r.url || `${r.source}:${r.title}:${r.snippet}`).toLowerCase()
+      // 无 URL 来源（MCP）的去重键不含 title：title 现携带查询词，
+      // 同一内容被不同查询命中时仍须按 source+snippet 判重
+      const key = (r.url || `${r.source}:${r.snippet}`).toLowerCase()
       if (!seenUrls.has(key)) {
         seenUrls.add(key)
         allResults.push(r)

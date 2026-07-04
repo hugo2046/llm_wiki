@@ -288,6 +288,22 @@ describe("collectResearchSources with MCP", () => {
     expect(errors).toEqual([])
   })
 
+  it("同一内容被不同查询命中（title 各异）时仍按 source+snippet 去重", async () => {
+    const dupA = { ...mcpResult, title: "tushare/stock_news: q1" }
+    const dupB = { ...mcpResult, title: "tushare/stock_news: q2" }
+    const { results } = await collectResearchSources(
+      ["q1", "q2"],
+      config({ mcpServers: [mcpServer] }),
+      "C:/proj",
+      {
+        webSearch: vi.fn().mockResolvedValue([]),
+        anyTxtSearch: vi.fn().mockResolvedValue([]),
+        mcpBatch: vi.fn().mockResolvedValue({ results: [dupA, dupB], errors: [] }),
+      },
+    )
+    expect(results).toEqual([dupA]) // 第二条同内容被判重丢弃
+  })
+
   it("禁用与配置不全的 server 不调用", async () => {
     const mcpBatch = vi.fn()
     await collectResearchSources(

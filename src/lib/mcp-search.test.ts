@@ -236,6 +236,35 @@ describe("callMcpToolBatch", () => {
     expect(errors).toEqual(["MCP tushare: tools/call: unknown tool"])
   })
 
+  it("批内查询并行执行（不因前一查询未返回而阻塞后续）", async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(
+        { jsonrpc: "2.0", id: 1, result: {} },
+        { "mcp-session-id": "sess-9" },
+      ))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+    fetchMock.mockImplementation(async (_url, opts) => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight--
+      const body = JSON.parse((opts as RequestInit).body as string) as { id: number }
+      return jsonResponse({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: { content: [{ type: "text", text: `r${body.id}` }] },
+      })
+    })
+
+    const { results, errors } = await callMcpToolBatch(server, ["q1", "q2", "q3"])
+
+    expect(errors).toEqual([])
+    expect(results.map((r) => r.snippet)).toEqual(["r2", "r3", "r4"]) // 按查询顺序归集
+    expect(maxInFlight).toBeGreaterThanOrEqual(2) // 确曾并行
+  })
+
   it("会话建立失败时整批失败", async () => {
     fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED"))
     const { results, errors } = await callMcpToolBatch(server, ["q1", "q2"])

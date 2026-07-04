@@ -157,19 +157,28 @@ async function readJsonRpc(res: Response, id: number): Promise<JsonRpcResponse |
 }
 
 interface McpSession {
-  post: (id: number, method: string, params?: unknown) => Promise<JsonRpcResponse | null>
+  post: (
+    id: number,
+    method: string,
+    params?: unknown,
+    signal?: AbortSignal,
+  ) => Promise<JsonRpcResponse | null>
 }
 
 /** 建立会话：initialize + notifications/initialized，返回带 session 头的 post。 */
 async function openMcpSession(server: McpServerConfig, signal: AbortSignal): Promise<McpSession> {
   const httpFetch = await getHttpFetch()
 
-  async function rawPost(payload: object, sessionId: string | null): Promise<Response> {
+  async function rawPost(
+    payload: object,
+    sessionId: string | null,
+    requestSignal: AbortSignal = signal,
+  ): Promise<Response> {
     return httpFetch(server.url, {
       method: "POST",
       headers: baseHeaders(server, sessionId),
       body: JSON.stringify(payload),
-      signal,
+      signal: requestSignal,
     })
   }
 
@@ -191,12 +200,13 @@ async function openMcpSession(server: McpServerConfig, signal: AbortSignal): Pro
   await rawPost({ jsonrpc: "2.0", method: "notifications/initialized" }, sessionId)
 
   return {
-    post: async (id, method, params) => {
+    post: async (id, method, params, requestSignal) => {
       const res = await rawPost(
         params === undefined
           ? { jsonrpc: "2.0", id, method }
           : { jsonrpc: "2.0", id, method, params },
         sessionId,
+        requestSignal,
       )
       if (!res.ok) throw new Error(`${method} HTTP ${res.status}`)
       return readJsonRpc(res, id)
@@ -207,32 +217,48 @@ async function openMcpSession(server: McpServerConfig, signal: AbortSignal): Pro
 /**
  * 对单个 MCP server 批量执行检索：一次会话（initialize/initialized）
  * 复用于多个查询的 tools/call——S×Q 扇出下请求量从 3×S×Q 降为
- * S×(2+Q)。批内单查询失败不中断其余查询。
+ * S×(2+Q)。查询间并行执行、各自独立超时；单查询失败不中断其余。
  *
  * :param server: server 配置
  * :param queries: 查询词列表
- * :param timeoutMs: 整个批次会话的超时（默认 30 秒）
- * :returns: { results: 全部成功查询的合并结果, errors: 带前缀的失败消息 }
+ * :param timeoutMs: 会话建立与每个查询各自的超时（默认 30 秒）
+ * :returns: { results: 按查询顺序归集的成功结果, errors: 带前缀的失败消息 }
  */
 export async function callMcpToolBatch(
   server: McpServerConfig,
   queries: string[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<{ results: WebSearchResult[]; errors: string[] }> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
   const results: WebSearchResult[] = []
   const errors: string[] = []
+
+  // 会话建立有独立超时；失败则整批失败
+  const openController = new AbortController()
+  const openTimer = setTimeout(() => openController.abort(), timeoutMs)
+  let session: McpSession
   try {
-    const session = await openMcpSession(server, controller.signal)
-    let requestId = 2
-    for (const query of queries) {
+    session = await openMcpSession(server, openController.signal)
+  } catch (err) {
+    errors.push(`MCP ${server.name}: ${describeMcpError(err)}`)
+    return { results, errors }
+  } finally {
+    clearTimeout(openTimer)
+  }
+
+  // 查询并行执行、各自独立超时——保持旧实现的每查询并发语义，
+  // 慢工具 × 多查询不再互相挤占同一个时间预算；结果按查询顺序归集
+  const perQuery = await Promise.all(
+    queries.map(async (query, index) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
       try {
         const args = buildToolArguments(server, query)
-        const msg = await session.post(requestId++, "tools/call", {
-          name: server.toolName,
-          arguments: args,
-        })
+        const msg = await session.post(
+          2 + index,
+          "tools/call",
+          { name: server.toolName, arguments: args },
+          controller.signal,
+        )
         if (!msg) throw new Error("响应中未找到 tools/call 结果")
         if (msg.error) throw new Error(`tools/call: ${msg.error.message}`)
         const result = (msg.result ?? {}) as { content?: McpContentBlock[]; isError?: boolean }
@@ -243,16 +269,17 @@ export async function callMcpToolBatch(
             .join(" ")
           throw new Error(detail || "工具返回 isError")
         }
-        results.push(...mapMcpContent(server, result.content ?? [], query))
+        return { items: mapMcpContent(server, result.content ?? [], query), error: null as string | null }
       } catch (err) {
-        errors.push(`MCP ${server.name}: ${describeMcpError(err)}`)
+        return { items: [] as WebSearchResult[], error: `MCP ${server.name}: ${describeMcpError(err)}` }
+      } finally {
+        clearTimeout(timer)
       }
-    }
-  } catch (err) {
-    // 会话建立失败：整批失败
-    errors.push(`MCP ${server.name}: ${describeMcpError(err)}`)
-  } finally {
-    clearTimeout(timer)
+    }),
+  )
+  for (const outcome of perQuery) {
+    results.push(...outcome.items)
+    if (outcome.error) errors.push(outcome.error)
   }
   return { results, errors }
 }
