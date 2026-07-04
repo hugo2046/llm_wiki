@@ -191,6 +191,16 @@ describe("matchStock", () => {
     expect(matchStock("京东集团物流业务纪要", tagged)?.stock.tsCode).toBe("09618.HK")
   })
 
+  it("only strips enum market tags: a non-tag uppercase suffix stays in the base name", () => {
+    // -AI 不在枚举集（U/W/B/S/UW/WD/SW）内，属股名本体不剥除：
+    // 与同前缀个股平局时不再被误判为"基名整名命中"而胜出，维持歧义
+    const stocks: StockRecord[] = [
+      { tsCode: "800001.XX", name: "小米-AI", cnspell: "xmai" },
+      { tsCode: "800002.XX", name: "小米通讯", cnspell: "xmtx" },
+    ]
+    expect(matchStock("小米近况交流", stocks)).toBeNull()
+  })
+
   it("strips the 未股改 S prefix (S佳通 → 佳通)", () => {
     const s: StockRecord[] = [{ tsCode: "600182.SH", name: "S佳通", cnspell: "sjt" }]
     expect(matchStock("佳通轮胎渠道调研", s)?.stock.tsCode).toBe("600182.SH")

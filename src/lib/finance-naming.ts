@@ -149,17 +149,25 @@ function normalizeForMatch(text: string): string {
 }
 
 /**
+ * 连字符市场标记的枚举集（tushare A股/港股命名）：
+ * -U 未盈利、-W 同股不同权、-B 生科、-S 第二上市、-UW/-WD/-SW 组合。
+ * 仅认枚举集，-AI/-ESG 类纯大写缩写属于股名本体，不作标记剥除；
+ * 长标记在前保证正确择优。
+ */
+const HYPHEN_MARKET_TAG = "(?:UW|WD|SW|U|W|B|S)"
+
+/**
  * 剥除股票名中的市场标记，得到主体基名（输入须已归一化）。
  *
  * 前缀：ST/*ST/SST/S*ST（风险警示）、S（未股改，后随非拉丁字母，
- * 避免误伤 SOHO 中国类英文名）；后缀：连字符标记 -U/-W/-UW/-WD/-SW 等
- * （统一按 -大写字母段 剥除）、裸 A/B（深市老 A/B 股类别）。
+ * 避免误伤 SOHO 中国类英文名）；后缀：连字符标记（HYPHEN_MARKET_TAG
+ * 枚举集）、裸 A/B（深市老 A/B 股类别）。
  */
 function stripStockMarkers(name: string): string {
   return name
     .replace(/^S?\*?ST/, "")
     .replace(/^S(?![A-Z])/, "")
-    .replace(/-[A-Z]{1,3}$/, "")
+    .replace(new RegExp(`-${HYPHEN_MARKET_TAG}$`), "")
     .replace(/[AB]$/, "")
 }
 
