@@ -2152,7 +2152,7 @@ export function buildGenerationPrompt(
       ? [
           "PAGES entries MUST be exact relative paths of REAL wiki pages: copy them from the \"Existing Wiki Pages\" list below or from a FILE block you emit in THIS response. Exact paths of other existing pages (the list may be truncated) are also accepted, but NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
           "",
-          "## Existing Wiki Pages (closed set for PAGES)",
+          "## Existing Wiki Pages (known real paths; the list may be truncated)",
           pageInventory,
         ]
       : [
@@ -2225,7 +2225,7 @@ function buildReviewSuggestionPrompt(
       ? [
           "PAGES entries MUST be exact relative paths of REAL wiki pages: copy them from the \"Existing Wiki Pages\" list below or from FILE paths emitted during generation (the excerpt above may be truncated — any exact FILE path from this ingest is valid). Exact paths of other existing pages are also accepted, but NEVER invent, translate, or transliterate slugs — unresolvable paths will be dropped.",
           "",
-          "## Existing Wiki Pages (closed set for PAGES)",
+          "## Existing Wiki Pages (known real paths; the list may be truncated)",
           pageInventory,
         ]
       : [

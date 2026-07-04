@@ -1,6 +1,6 @@
 import { anyTxtSearchSmart, hasConfiguredAnyTxt } from "./anytxt-search"
 import { hasConfiguredSearchProvider, resolveSearchConfig, webSearch } from "./web-search"
-import { callMcpToolBatch } from "./mcp-search"
+import { callMcpToolBatch, isRunnableMcpServer } from "./mcp-search"
 import { streamChat } from "./llm-client"
 import { autoIngest, currentWikiDate } from "./ingest"
 import { writeFile, readFile } from "@/commands/fs"
@@ -206,9 +206,7 @@ export async function collectResearchSources(
   // MCP 数据源：启用且配置完整的 server 各发一个批次（会话复用于全部
   // 查询词），追加在 web/anytxt 之后；批内单查询失败并入统一错误通道
   const mcpBatch = deps.mcpBatch ?? callMcpToolBatch
-  const mcpServers = (resolvedSearchConfig.mcpServers ?? []).filter(
-    (s) => s.enabled && s.url.trim() && s.toolName.trim(),
-  )
+  const mcpServers = (resolvedSearchConfig.mcpServers ?? []).filter(isRunnableMcpServer)
   for (const server of mcpServers) {
     calls.push(
       mcpBatch(server, webQueries).then(({ results, errors: batchErrors }) => {

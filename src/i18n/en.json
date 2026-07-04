@@ -32,7 +32,7 @@
   },
   "research": {
     "title": "Deep Research",
-    "notConfigured": "Deep Research sources are not configured. Go to Settings → External Information Sources to configure Web Search or AnyTXT.",
+    "notConfigured": "Deep Research sources are not configured. Go to Settings → External Information Sources to configure Web Search, AnyTXT, or an MCP data source.",
     "activeBadge": "{{running}} active{{queued, plural, =0 {} other {, {{queued}} queued}}}",
     "inputPlaceholder": "Enter a research topic...",
     "emptyTitle": "No research tasks yet",

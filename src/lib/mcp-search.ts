@@ -23,6 +23,19 @@ export interface McpServerConfig {
   enabled: boolean
 }
 
+/**
+ * server 是否具备参战条件（启用且 url/toolName 非空）。
+ *
+ * 深度研究门控（hasConfiguredDeepResearchSources）与检索过滤
+ * （collectResearchSources）共用此谓词，保证两端判定永远一致。
+ *
+ * :param server: server 配置
+ * :returns: 是否可参与检索
+ */
+export function isRunnableMcpServer(server: McpServerConfig): boolean {
+  return server.enabled && server.url.trim().length > 0 && server.toolName.trim().length > 0
+}
+
 export interface JsonRpcResponse {
   jsonrpc: "2.0"
   id?: number | string | null
@@ -108,8 +121,10 @@ export function mapMcpContent(
   blocks: McpContentBlock[],
   query: string,
 ): WebSearchResult[] {
-  const shortQuery = query.length > TITLE_QUERY_MAX_CHARS
-    ? `${query.slice(0, TITLE_QUERY_MAX_CHARS)}…`
+  // 按码点截断，避免在代理对中间劈开产生乱码
+  const queryPoints = Array.from(query)
+  const shortQuery = queryPoints.length > TITLE_QUERY_MAX_CHARS
+    ? `${queryPoints.slice(0, TITLE_QUERY_MAX_CHARS).join("")}…`
     : query
   const out: WebSearchResult[] = []
   for (const block of blocks) {
@@ -128,7 +143,8 @@ export function mapMcpContent(
 /** 网络类错误归一为友好文案（沿用 tauri-fetch 的跨平台判定，与兄弟集成一致）。 */
 function describeMcpError(err: unknown): string {
   if (isFetchNetworkError(err)) {
-    return "网络请求失败：无法连接 MCP 端点，请确认 server 正在运行且 URL 正确"
+    // 英文硬编码与 anytxt-search 同类路径的既有约定一致
+    return "Network error reaching the MCP endpoint. Check that the server is running and the URL is correct."
   }
   return err instanceof Error ? err.message : String(err)
 }
@@ -284,24 +300,6 @@ export async function callMcpToolBatch(
   return { results, errors }
 }
 
-/**
- * 对单个 MCP server 执行一次检索调用（单查询便捷封装）。
- *
- * :param server: server 配置
- * :param query: 查询词
- * :param timeoutMs: 整个会话的超时（默认 30 秒）
- * :returns: 映射后的检索结果
- * :raises Error: 任何失败均带 `MCP <name>: ` 前缀
- */
-export async function callMcpTool(
-  server: McpServerConfig,
-  query: string,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
-): Promise<WebSearchResult[]> {
-  const { results, errors } = await callMcpToolBatch(server, [query], timeoutMs)
-  if (errors.length > 0) throw new Error(errors[0])
-  return results
-}
 
 /**
  * 测试连接：initialize + tools/list，校验配置的 toolName 是否存在。

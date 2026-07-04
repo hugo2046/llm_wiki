@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   buildToolArguments,
-  callMcpTool,
   callMcpToolBatch,
   mapMcpContent,
   parseSseJsonRpcResponse,
@@ -105,9 +104,14 @@ describe("mapMcpContent", () => {
     const out = mapMcpContent(server, [{ type: "text", text: "x" }], "查".repeat(60))
     expect(out[0].title).toBe(`tushare/stock_news: ${"查".repeat(40)}…`)
   })
+
+  it("按码点截断，代理对不被劈开（扩展区汉字）", () => {
+    const out = mapMcpContent(server, [{ type: "text", text: "x" }], "𠮷".repeat(45))
+    expect(out[0].title).toBe(`tushare/stock_news: ${"𠮷".repeat(40)}…`)
+  })
 })
 
-describe("callMcpTool", () => {
+describe("callMcpToolBatch 单查询会话流程", () => {
   it("完整会话流程：initialize 带协议版本，后续请求透传 session 与 auth 头", async () => {
     queueSession(jsonResponse({
       jsonrpc: "2.0",
@@ -115,8 +119,9 @@ describe("callMcpTool", () => {
       result: { content: [{ type: "text", text: "净利润同比 +12%" }] },
     }))
 
-    const results = await callMcpTool(server, "贵州茅台 财报")
+    const { results, errors } = await callMcpToolBatch(server, ["贵州茅台 财报"])
 
+    expect(errors).toEqual([])
     expect(results).toEqual([{
       title: "tushare/stock_news: 贵州茅台 财报",
       url: "",
@@ -144,36 +149,39 @@ describe("callMcpTool", () => {
       'event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"ok"}]}}\n\n',
       { status: 200, headers: { "content-type": "text/event-stream" } },
     ))
-    const results = await callMcpTool(server, "q")
+    const { results } = await callMcpToolBatch(server, ["q"])
     expect(results).toHaveLength(1)
     expect(results[0].snippet).toBe("ok")
   })
 
-  it("isError 结果抛出带 server 名前缀的错误", async () => {
+  it("isError 结果归为带 server 名前缀的错误", async () => {
     queueSession(jsonResponse({
       jsonrpc: "2.0",
       id: 2,
       result: { isError: true, content: [{ type: "text", text: "invalid token" }] },
     }))
-    await expect(callMcpTool(server, "q")).rejects.toThrow(/^MCP tushare: .*invalid token/)
+    const { results, errors } = await callMcpToolBatch(server, ["q"])
+    expect(results).toEqual([])
+    expect(errors[0]).toMatch(/^MCP tushare: .*invalid token/)
   })
 
-  it("JSON-RPC error 与非 2xx 都抛错", async () => {
+  it("JSON-RPC error 与非 2xx 都归为错误", async () => {
     queueSession(jsonResponse({
       jsonrpc: "2.0",
       id: 2,
       error: { code: -32602, message: "unknown tool" },
     }))
-    await expect(callMcpTool(server, "q")).rejects.toThrow(/unknown tool/)
+    expect((await callMcpToolBatch(server, ["q"])).errors[0]).toMatch(/unknown tool/)
 
     fetchMock.mockReset()
     fetchMock.mockResolvedValueOnce(new Response("boom", { status: 500 }))
-    await expect(callMcpTool(server, "q")).rejects.toThrow(/MCP tushare: .*500/)
+    expect((await callMcpToolBatch(server, ["q"])).errors[0]).toMatch(/MCP tushare: .*500/)
   })
 
-  it("网络类错误归一为友好文案", async () => {
+  it("网络类错误归一为友好文案（与 anytxt 英文约定一致）", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"))
-    await expect(callMcpTool(server, "q")).rejects.toThrow(/MCP tushare: 网络请求失败：无法连接 MCP 端点/)
+    const { errors } = await callMcpToolBatch(server, ["q"])
+    expect(errors[0]).toMatch(/MCP tushare: Network error reaching the MCP endpoint/)
   })
 })
 

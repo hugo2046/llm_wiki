@@ -32,7 +32,7 @@
   },
   "research": {
     "title": "深度研究",
-    "notConfigured": "深度研究信息来源尚未配置。请到设置 → 外部信息源中配置网页搜索或 AnyTXT。",
+    "notConfigured": "深度研究信息来源尚未配置。请到设置 → 外部信息源中配置网页搜索、AnyTXT 或 MCP 数据源。",
     "activeBadge": "{{running}} 个运行中{{queued, plural, =0 {} other {，{{queued}} 个排队中}}}",
     "inputPlaceholder": "输入研究主题...",
     "emptyTitle": "还没有研究任务",
