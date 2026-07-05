@@ -608,6 +608,9 @@ export async function restoreQueue(
 // ── Processing ────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 3
+// 超时是确定性错误：同模型跑同上下文原样重试大概率仍超时。
+// 收紧到「原始尝试 + 1 次静默重试」，让失败态重试按钮更快出现。
+const TIMEOUT_MAX_RETRIES = 2
 const USAGE_LIMIT_AUTO_RESUME_MS = 15 * 60 * 1000
 let usageLimitResumeTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -620,6 +623,11 @@ function clearUsageLimitAutoResume(): void {
 
 function isUsageLimitError(message: string): boolean {
   return /\b429\b|rate[_\s-]*limit|usage\s+limit|quota|too many requests/i.test(message)
+}
+
+/** 超时类错误：原样重试大概率仍失败，重试预算收紧。 */
+function isTimeoutError(message: string): boolean {
+  return /timed out|timeout/i.test(message)
 }
 
 function scheduleUsageLimitAutoResume(projectId: string): void {
@@ -805,12 +813,19 @@ async function processNext(projectId: string): Promise<void> {
     next.retryCount++
     next.error = message
 
-    if (next.retryCount >= MAX_RETRIES) {
+    // 超时是确定性错误，重试预算收紧到 1 次；其它瞬时错误保持 3 次。
+    const maxRetries = isTimeoutError(message) ? TIMEOUT_MAX_RETRIES : MAX_RETRIES
+
+    if (next.retryCount >= maxRetries) {
       next.status = "failed"
       console.log(`[Ingest Queue] Failed (${next.retryCount}x): ${next.sourcePath} — ${message}`)
     } else {
       next.status = "pending" // will retry
-      console.log(`[Ingest Queue] Error (retry ${next.retryCount}/${MAX_RETRIES}): ${next.sourcePath} — ${message}`)
+      // 队尾让路：把反复失败的任务挪到数组末尾，processNext 会先挑其它
+      // 待处理任务，避免一份慢/超时文档堵住整批。
+      queue = queue.filter((t) => t.id !== next.id)
+      queue.push(next)
+      console.log(`[Ingest Queue] Error (retry ${next.retryCount}/${maxRetries}): ${next.sourcePath} — ${message}`)
     }
 
     await saveQueue(pp)

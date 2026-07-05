@@ -267,6 +267,75 @@ describe("ingest-queue — retry & failure", () => {
   })
 })
 
+describe("ingest-queue — timeout fast-fail & queue-tail yielding", () => {
+  it("marks a timeout as failed after 2 attempts (no 3rd try)", async () => {
+    // 超时是确定性错误：原始尝试 + 1 次静默重试即标 failed。
+    mockAutoIngest.mockRejectedValue(new Error("Request timed out after 30 min"))
+
+    await enqueueIngest(TEST_ID, "slow.docx")
+    await flushMicrotasks(30)
+
+    expect(mockAutoIngest).toHaveBeenCalledTimes(2)
+    const queue = getQueue()
+    expect(queue).toHaveLength(1)
+    expect(queue[0].status).toBe("failed")
+    expect(queue[0].retryCount).toBe(2)
+    expect(queue[0].error).toContain("timed out")
+  })
+
+  it("still gives ordinary errors the full MAX_RETRIES=3 budget", async () => {
+    // 回归保护：非超时错误不得被收紧预算误伤。
+    mockAutoIngest.mockRejectedValue(new Error("LLM error"))
+
+    await enqueueIngest(TEST_ID, "flaky.md")
+    await flushMicrotasks(30)
+
+    expect(mockAutoIngest).toHaveBeenCalledTimes(3)
+    const queue = getQueue()
+    expect(queue[0].status).toBe("failed")
+    expect(queue[0].retryCount).toBe(3)
+  })
+
+  it("yields the head of the queue to other pending tasks after a retryable failure", async () => {
+    // A 在前、B 在后。A 首次失败（可重试）后应被挪到队尾，下一个处理 B。
+    mockAutoIngest
+      .mockRejectedValueOnce(new Error("transient")) // A 第 1 次：失败、回 pending、让路
+      .mockImplementation(() => new Promise(() => {})) // B：阻塞，便于观察队列顺序
+
+    await enqueueBatch(TEST_ID, [
+      { sourcePath: "a.md", folderContext: "" },
+      { sourcePath: "b.md", folderContext: "" },
+    ])
+    await flushMicrotasks(10)
+
+    // A 失败 1 次（回 pending），B 随即被取走处理（被阻塞挂起）。
+    expect(mockAutoIngest).toHaveBeenCalledTimes(2)
+    expect(mockAutoIngest.mock.calls[1][1]).toBe(`${TEST_PATH}/b.md`)
+    // 队尾让路：B 应排在 A 之前。
+    expect(getQueue().map((t) => t.sourcePath)).toEqual(["b.md", "a.md"])
+    const a = getQueue().find((t) => t.sourcePath === "a.md")!
+    expect(a.status).toBe("pending")
+    expect(a.retryCount).toBe(1)
+    const b = getQueue().find((t) => t.sourcePath === "b.md")!
+    expect(b.status).toBe("processing")
+  })
+
+  it("still routes usage-limit errors through the pause branch (regression)", async () => {
+    // 回归保护：429/限流仍走 isUsageLimitError 的暂停分支，不进入新的预算分流。
+    mockAutoIngest.mockRejectedValue(new Error("429 rate limit exceeded"))
+
+    await enqueueIngest(TEST_ID, "limited.md")
+    await flushMicrotasks(10)
+
+    expect(mockAutoIngest).toHaveBeenCalledTimes(1)
+    const task = getQueue().find((t) => t.sourcePath === "limited.md")!
+    expect(task.status).toBe("pending")
+    expect(task.retryCount).toBe(0)
+    expect(task.error).toContain("Paused after provider usage limit")
+    expect(getQueueSummary().paused).toBe(true)
+  })
+})
+
 describe("ingest-queue — cancel", () => {
   it("cancelTask removes a pending task without calling autoIngest", async () => {
     mockAutoIngest.mockImplementation(() => new Promise(() => {})) // block first task
