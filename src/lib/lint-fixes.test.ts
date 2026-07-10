@@ -11,6 +11,8 @@ vi.mock("@/commands/fs", () => fsMocks)
 import {
   appendWikilink,
   ensureBrokenLinkStub,
+  isDeletableLintStub,
+  LINT_STUB_SENTINEL,
   rewriteWikilinkTarget,
   stubRelativePathFromBrokenTarget,
 } from "./lint-fixes"
@@ -90,5 +92,78 @@ describe("ensureBrokenLinkStub", () => {
 
   it("keeps explicit wiki subdirectories when building stub paths", () => {
     expect(stubRelativePathFromBrokenTarget("concepts/Foo Bar")).toBe("concepts/foo-bar.md")
+  })
+})
+
+describe("isDeletableLintStub", () => {
+  // A stub as freshly written by ensureBrokenLinkStub: tags + sentinel,
+  // no other body.
+  function stub(body: string, tags = "[stub, lint]"): string {
+    return [
+      "---",
+      "type: query",
+      'title: "Foo"',
+      `tags: ${tags}`,
+      "related: []",
+      "sources: []",
+      "---",
+      "",
+      "# Foo",
+      "",
+      LINT_STUB_SENTINEL,
+      body,
+    ].join("\n")
+  }
+
+  it("deletes a pure-sentinel stub", () => {
+    expect(isDeletableLintStub(stub(""))).toBe(true)
+  })
+
+  it("deletes a stub carrying only an auto-generated Related wikilink list", () => {
+    const body = "\n## Related\n- [[queries/foo]]\n- [[queries/bar]]\n"
+    expect(isDeletableLintStub(stub(body))).toBe(true)
+  })
+
+  it("deletes a stub whose Related list holds bare-slug residue from prior deletes", () => {
+    // `stripDeletedWikilinks` degrades dead `[[queries/ansaldo]]` to plain
+    // `queries/ansaldo`; that residue must not block deletion.
+    const body = "\n## Related\n- [[queries/foo]]\n- queries/ansaldo\n"
+    expect(isDeletableLintStub(stub(body))).toBe(true)
+  })
+
+  it("keeps a stub-tagged page that gained human prose", () => {
+    const body = "\n## 背景\n这是用户后来补写的真实分析。\n"
+    expect(isDeletableLintStub(stub(body))).toBe(false)
+  })
+
+  it("keeps a page whose Related item is a free-text note, not a link", () => {
+    const body = "\n## Related\n- 记得核对这个供应商的产能\n"
+    expect(isDeletableLintStub(stub(body))).toBe(false)
+  })
+
+  it("keeps a page missing the stub/lint tags even if the sentinel is present", () => {
+    expect(isDeletableLintStub(stub("", "[天然铀, 价格催化]"))).toBe(false)
+  })
+
+  it("keeps a tagged page that no longer contains the sentinel", () => {
+    const content = [
+      "---",
+      "tags: [stub, lint]",
+      "---",
+      "",
+      "# Foo",
+      "",
+      "Real content now.",
+    ].join("\n")
+    expect(isDeletableLintStub(content)).toBe(false)
+  })
+
+  it("returns false (conservative) for a CRLF file the frontmatter parser can't read", () => {
+    const content = stub("").replace(/\n/g, "\r\n")
+    expect(isDeletableLintStub(content)).toBe(false)
+  })
+
+  it("returns false when there is no frontmatter at all", () => {
+    expect(isDeletableLintStub(`# Foo\n\n${LINT_STUB_SENTINEL}\n`)).toBe(false)
   })
 })

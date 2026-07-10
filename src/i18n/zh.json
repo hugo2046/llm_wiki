@@ -245,11 +245,15 @@
     "suggestedTarget": "建议目标：{{page}}",
     "suggestedSource": "建议来源：{{page}}",
     "deleteOrphanConfirm": "删除孤立页面「{{page}}」？",
+    "deleteStubConfirm": "删除空占位页「{{page}}」？",
+    "deleteStubsSelected": "删除占位页",
+    "deleteStubsConfirm": "删除 {{count}} 个空占位页？wiki 中指向它们的链接会被一并清除。",
     "typeLabels": {
       "orphan": "孤立页面",
       "broken-link": "失效链接",
       "no-outlinks": "无出站链接",
-      "semantic": "语义问题"
+      "semantic": "语义问题",
+      "stub-page": "空占位页"
     },
     "issues": "{{count}} 个问题",
     "issues_plural": "{{count}} 个问题"

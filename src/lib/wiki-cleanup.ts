@@ -109,6 +109,12 @@ export function cleanIndexListing(text: string, deletedKeys: Set<string>): strin
 
 const WIKILINK_RE = /\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g
 
+// A list line whose entire payload is a single wikilink, e.g.
+// `- [[queries/foo]]` or `* [[foo|Alias]]`. When that link points at a
+// deleted page the line carries no residual information, so we drop the
+// whole line rather than degrade it into a bare-slug bullet.
+const LIST_ONLY_WIKILINK_RE = /^[-*]\s+\[\[([^\]|]+?)(?:\|[^\]]+?)?\]\]$/
+
 /**
  * Replace wikilinks pointing to deleted pages with plain text, leaving
  * wikilinks to surviving pages alone.
@@ -116,15 +122,33 @@ const WIKILINK_RE = /\[\[([^\]|]+?)(?:\|([^\]]+))?\]\]/g
  *   [[deleted]]         → deleted
  *   [[deleted|display]] → display
  *   [[kept]]            → [[kept]]   (unchanged)
+ *   - [[deleted]]       → (line removed — see below)
+ *
+ * A list item whose whole payload is a dead wikilink is removed outright:
+ * degrading it would leave a `- deleted` bullet, exactly the kind of
+ * information-free residue this cleanup exists to remove (and which, left
+ * behind, re-accumulates across successive deletes). Dead links embedded
+ * in prose or in a list item alongside other text still degrade to plain
+ * text.
  *
  * Designed for overview.md and any other prose page that might
  * cross-reference the deleted pages.
  */
 export function stripDeletedWikilinks(text: string, deletedKeys: Set<string>): string {
   if (deletedKeys.size === 0) return text
-  return text.replace(WIKILINK_RE, (match, target: string, display: string | undefined) => {
-    const key = normalizeWikiRefKey(target.trim())
-    if (!deletedKeys.has(key)) return match
-    return display ?? target
-  })
+  return text
+    .split("\n")
+    .filter((line) => {
+      const m = line.trim().match(LIST_ONLY_WIKILINK_RE)
+      if (!m) return true
+      return !deletedKeys.has(normalizeWikiRefKey(m[1].trim()))
+    })
+    .map((line) =>
+      line.replace(WIKILINK_RE, (match, target: string, display: string | undefined) => {
+        const key = normalizeWikiRefKey(target.trim())
+        if (!deletedKeys.has(key)) return match
+        return display ?? target
+      }),
+    )
+    .join("\n")
 }

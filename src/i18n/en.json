@@ -245,11 +245,15 @@
     "suggestedTarget": "Suggested target: {{page}}",
     "suggestedSource": "Suggested source: {{page}}",
     "deleteOrphanConfirm": "Delete orphan page \"{{page}}\"?",
+    "deleteStubConfirm": "Delete empty placeholder page \"{{page}}\"?",
+    "deleteStubsSelected": "Delete placeholders",
+    "deleteStubsConfirm": "Delete {{count}} empty placeholder page(s)? Links to them elsewhere in the wiki will be removed.",
     "typeLabels": {
       "orphan": "Orphan Page",
       "broken-link": "Broken Link",
       "no-outlinks": "No Outbound Links",
-      "semantic": "Semantic Issue"
+      "semantic": "Semantic Issue",
+      "stub-page": "Empty Placeholder"
     },
     "issues": "{{count}} issue",
     "issues_plural": "{{count}} issues"

@@ -10,6 +10,7 @@ import {
   BrainCircuit,
   Wrench,
   Trash2,
+  FileX,
   Link,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -62,6 +63,7 @@ export function LintView() {
     "broken-link": { icon: Link2Off, label: t("lint.typeLabels.broken-link") },
     "no-outlinks": { icon: ArrowUpRight, label: t("lint.typeLabels.no-outlinks") },
     semantic: { icon: BrainCircuit, label: t("lint.typeLabels.semantic") },
+    "stub-page": { icon: FileX, label: t("lint.typeLabels.stub-page") },
   }), [t])
 
   const items = useLintStore((s) => s.items)
@@ -215,6 +217,13 @@ export function LintView() {
           break
         }
 
+        case "stub-page": {
+          // Placeholders are deleted, never "fixed". A batch Fix that
+          // happens to include one is a no-op; the item stays for the
+          // dedicated delete action.
+          break
+        }
+
         default: {
           // Semantic issues → send to Review for manual resolution
           addLintItemToReview(item)
@@ -240,7 +249,8 @@ export function LintView() {
     if (!project) return
     const pp = normalizePath(project.path)
     const pagePath = `${pp}/wiki/${item.page}`
-    const confirmed = window.confirm(t("lint.deleteOrphanConfirm", { page: item.page }))
+    const confirmKey = item.type === "stub-page" ? "lint.deleteStubConfirm" : "lint.deleteOrphanConfirm"
+    const confirmed = window.confirm(t(confirmKey, { page: item.page }))
     if (!confirmed) return
 
     try {
@@ -324,6 +334,38 @@ export function LintView() {
     }
   }, [batchFixing, project, selectedLintItems])
 
+  const handleBatchDelete = useCallback(async () => {
+    if (!project || batchFixing) return
+    const pp = normalizePath(project.path)
+    // Only stub-page items are batch-deletable. Collect every selected
+    // one and hand the whole array to a SINGLE cascade + SINGLE refresh:
+    // the cascade sweeps all surviving wiki files once, so per-item
+    // looping (as handleBatchFix does) would re-scan the whole wiki once
+    // per placeholder — catastrophic for the 100+ stub case.
+    const stubItems = selectedLintItems.filter((item) => item.type === "stub-page")
+    if (stubItems.length === 0) return
+    const confirmed = window.confirm(t("lint.deleteStubsConfirm", { count: stubItems.length }))
+    if (!confirmed) return
+
+    setBatchFixing(true)
+    try {
+      const { cascadeDeleteWikiPagesWithRefs } = await import("@/lib/wiki-page-delete")
+      const paths = stubItems.map((item) => `${pp}/wiki/${item.page}`)
+      await cascadeDeleteWikiPagesWithRefs(pp, paths)
+      useLintStore.getState().removeItems(stubItems.map((item) => item.id))
+      setSelectedLintIds(new Set())
+      await refreshProjectFileTree(pp, {
+        projectId: project.id,
+        bumpDataVersion: true,
+      })
+    } catch (err) {
+      console.error("Batch delete failed:", err)
+      setFixError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBatchFixing(false)
+    }
+  }, [batchFixing, project, selectedLintItems, t])
+
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 flex items-center justify-between border-b px-4 py-3">
@@ -397,6 +439,18 @@ export function LintView() {
           >
             {t("lint.ignoreSelected")}
           </Button>
+          {selectedLintItems.some((item) => item.type === "stub-page") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs text-destructive hover:text-destructive"
+              disabled={isFixing}
+              onClick={handleBatchDelete}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              {t("lint.deleteStubsSelected")}
+            </Button>
+          )}
         </div>
       )}
 
@@ -432,7 +486,7 @@ export function LintView() {
                 onSelectedChange={setLintSelected}
                 onOpenPage={handleOpenPage}
                 onFix={handleFix}
-                onDelete={item.type === "orphan" ? handleDeleteOrphan : undefined}
+                onDelete={item.type === "orphan" || item.type === "stub-page" ? handleDeleteOrphan : undefined}
                 typeConfig={typeConfig}
                 t={t}
               />
@@ -449,7 +503,7 @@ export function LintView() {
                 onSelectedChange={setLintSelected}
                 onOpenPage={handleOpenPage}
                 onFix={handleFix}
-                onDelete={item.type === "orphan" ? handleDeleteOrphan : undefined}
+                onDelete={item.type === "orphan" || item.type === "stub-page" ? handleDeleteOrphan : undefined}
                 typeConfig={typeConfig}
                 t={t}
               />
@@ -568,16 +622,18 @@ function LintCard({
         >
           {t("lint.open")}
         </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-6 text-xs gap-1"
-          disabled={fixing}
-          onClick={() => onFix(item)}
-        >
-          <Wrench className="h-3 w-3" />
-          {fixing ? t("lint.fixing") : t("lint.fix")}
-        </Button>
+        {item.type !== "stub-page" && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs gap-1"
+            disabled={fixing}
+            onClick={() => onFix(item)}
+          >
+            <Wrench className="h-3 w-3" />
+            {fixing ? t("lint.fixing") : t("lint.fix")}
+          </Button>
+        )}
         {onDelete && (
           <Button
             variant="outline"

@@ -361,6 +361,38 @@ describe("stripDeletedWikilinks", () => {
     const text = "[[Kept]] and [[Also Kept]]"
     expect(stripDeletedWikilinks(text, new Set())).toBe(text)
   })
+
+  it("removes a list line that is only a dead wikilink, instead of degrading it", () => {
+    const text = ["## Related", "- [[deleted]]", "- [[Kept]]"].join("\n")
+    const keys = buildDeletedKeys([{ slug: "deleted", title: "Deleted" }])
+    expect(stripDeletedWikilinks(text, keys)).toBe(
+      ["## Related", "- [[Kept]]"].join("\n"),
+    )
+  })
+
+  it("removes a dead-link asterisk bullet as well", () => {
+    const text = ["* [[deleted]]", "* [[Kept]]"].join("\n")
+    const keys = buildDeletedKeys([{ slug: "deleted", title: "Deleted" }])
+    expect(stripDeletedWikilinks(text, keys)).toBe("* [[Kept]]")
+  })
+
+  it("removes a dead-link list line that also carries a display alias", () => {
+    const text = ["- [[deleted|Old Name]]", "- [[Kept]]"].join("\n")
+    const keys = buildDeletedKeys([{ slug: "deleted", title: "Deleted" }])
+    expect(stripDeletedWikilinks(text, keys)).toBe("- [[Kept]]")
+  })
+
+  it("degrades (not deletes) a list line that mixes a dead link with other text", () => {
+    const text = "- see [[deleted]] for context"
+    const keys = buildDeletedKeys([{ slug: "deleted", title: "Deleted" }])
+    expect(stripDeletedWikilinks(text, keys)).toBe("- see deleted for context")
+  })
+
+  it("still degrades an inline prose dead link to plain text", () => {
+    const text = "Discussed in [[deleted]] earlier."
+    const keys = buildDeletedKeys([{ slug: "deleted", title: "Deleted" }])
+    expect(stripDeletedWikilinks(text, keys)).toBe("Discussed in deleted earlier.")
+  })
 })
 
 // ── End-to-end scenarios that exercise cleanIndexListing + stripDeletedWikilinks ──
