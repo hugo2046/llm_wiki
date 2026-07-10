@@ -246,3 +246,64 @@ describe("runStructuralLint — link suggestions", () => {
     expect(broken?.suggestedTarget).toBeUndefined()
   })
 })
+
+describe("runStructuralLint — stub-page rule", () => {
+  const stubContent = [
+    "---",
+    "type: query",
+    'title: "Foo"',
+    "tags: [stub, lint]",
+    "related: []",
+    "sources: []",
+    "---",
+    "",
+    "# Foo",
+    "",
+    "Created by Wiki Lint as a placeholder for a missing wikilink target.",
+    "",
+  ].join("\n")
+
+  it("flags a lint placeholder as stub-page", async () => {
+    const pages = [makeFileNode("queries/foo.md", stubContent)]
+    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
+    mockReadFile.mockImplementation(async (path) => {
+      const match = pages.find((p) => p.node.path === path)
+      return match?.content ?? ""
+    })
+
+    const results = await runStructuralLint("/project")
+
+    expect(results.some((r) => r.type === "stub-page" && r.page === "queries/foo.md")).toBe(true)
+  })
+
+  it("suppresses orphan and no-outlinks findings on a stub page", async () => {
+    // A pure-sentinel stub has no inbound and no outbound links, so
+    // without suppression it would double-report as orphan + no-outlinks.
+    const pages = [makeFileNode("queries/foo.md", stubContent)]
+    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
+    mockReadFile.mockImplementation(async (path) => {
+      const match = pages.find((p) => p.node.path === path)
+      return match?.content ?? ""
+    })
+
+    const results = await runStructuralLint("/project")
+    const forStub = results.filter((r) => r.page === "queries/foo.md")
+
+    expect(forStub.every((r) => r.type !== "orphan" && r.type !== "no-outlinks")).toBe(true)
+  })
+
+  it("does not flag a real content page as stub-page", async () => {
+    const pages = [
+      makeFileNode("real.md", "---\ntitle: Real\ntags: [concept]\n---\n# Real\nActual analysis here."),
+    ]
+    mockListDirectory.mockResolvedValue(pages.map((p) => p.node))
+    mockReadFile.mockImplementation(async (path) => {
+      const match = pages.find((p) => p.node.path === path)
+      return match?.content ?? ""
+    })
+
+    const results = await runStructuralLint("/project")
+
+    expect(results.some((r) => r.type === "stub-page")).toBe(false)
+  })
+})

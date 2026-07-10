@@ -1,6 +1,15 @@
 import { createDirectory, fileExists, writeFile } from "@/commands/fs"
 import { getFileName, normalizePath } from "@/lib/path-utils"
 import { makeQuerySlug } from "@/lib/wiki-filename"
+import { parseFrontmatterArray } from "@/lib/sources-merge"
+
+/**
+ * The exact sentinel line `ensureBrokenLinkStub` writes into a freshly
+ * created placeholder page. Shared by the generator and the detector
+ * (`isDeletableLintStub`) so the two can never drift out of sync.
+ */
+export const LINT_STUB_SENTINEL =
+  "Created by Wiki Lint as a placeholder for a missing wikilink target."
 
 export function lintLinkTarget(target: string): string {
   return normalizePath(target)
@@ -92,9 +101,61 @@ export async function ensureBrokenLinkStub(
     "",
     `# ${title}`,
     "",
-    "Created by Wiki Lint as a placeholder for a missing wikilink target.",
+    LINT_STUB_SENTINEL,
     "",
   ].join("\n")
   await writeFile(fullPath, content)
   return { fullPath, relativePath, created: true }
+}
+
+// A Related-list item that carries no human information: either a
+// wikilink (`- [[queries/foo]]`) or a bare-slug residue left behind when
+// `stripDeletedWikilinks` degraded a dead link (`- queries/ansaldo`). The
+// `[\w./-]+` branch is deliberately ASCII-only so any free-text note
+// (e.g. `- 记得核对产能`) fails to match and blocks deletion.
+const RELATED_ITEM_RE = /^-\s+(\[\[[^\]]+\]\]|[\w./-]+)\s*$/
+
+/**
+ * Decide whether a wiki page is a Wiki-Lint placeholder safe to delete:
+ * a page that carries the `stub`+`lint` tags and the sentinel line, and
+ * whose body holds nothing beyond an auto-generated `## Related` list.
+ *
+ * The check is deliberately conservative — any prose paragraph, any
+ * heading other than the H1 title / `## Related`, or a non-link Related
+ * item makes it return `false`, so a placeholder a human later filled in
+ * with real analysis is never mistaken for deletable cruft.
+ *
+ * :param content: Full markdown source of the page (frontmatter + body).
+ * :returns: ``True`` only when the page is an empty lint placeholder.
+ */
+export function isDeletableLintStub(content: string): boolean {
+  // Fail-safe: a malformed/unreadable frontmatter (incl. CRLF files the
+  // parser can't handle) yields no tags → not deletable.
+  const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(content)
+  if (!fm) return false
+  const tags = parseFrontmatterArray(content, "tags")
+  if (!tags.includes("stub") || !tags.includes("lint")) return false
+
+  const lines = content.slice(fm[0].length).split(/\r?\n/)
+  if (!lines.some((line) => line.trim() === LINT_STUB_SENTINEL)) return false
+
+  let inRelated = false
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (line === "" || line === LINT_STUB_SENTINEL) continue
+    if (/^##\s+Related\s*$/i.test(line)) {
+      inRelated = true
+      continue
+    }
+    if (/^#\s/.test(line)) {
+      // H1 title line — allowed, but closes any Related section.
+      inRelated = false
+      continue
+    }
+    if (inRelated && RELATED_ITEM_RE.test(line)) continue
+    // Anything else (prose, other headings, free-text list items) means
+    // the page has real content → keep it.
+    return false
+  }
+  return true
 }

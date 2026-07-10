@@ -5,9 +5,10 @@ import type { FileNode } from "@/types/wiki"
 import { useActivityStore } from "@/stores/activity-store"
 import { getFileName, getRelativePath, normalizePath } from "@/lib/path-utils"
 import { buildLanguageDirective } from "@/lib/output-language"
+import { isDeletableLintStub } from "@/lib/lint-fixes"
 
 export interface LintResult {
-  type: "orphan" | "broken-link" | "no-outlinks" | "semantic"
+  type: "orphan" | "broken-link" | "no-outlinks" | "semantic" | "stub-page"
   severity: "warning" | "info"
   page: string
   detail: string
@@ -249,6 +250,21 @@ export async function runStructuralLint(projectPath: string): Promise<LintResult
 
   for (const p of pages) {
     const shortName = p.shortName
+
+    // Empty Wiki-Lint placeholder → single stub-page finding, and skip
+    // every other check for this page. A stub always has an inbound link
+    // (the broken link that spawned it was rewritten to point here), so
+    // it never surfaces as orphan; but a pure-sentinel one has no
+    // outlinks and would otherwise double-report as no-outlinks.
+    if (isDeletableLintStub(p.content)) {
+      results.push({
+        type: "stub-page",
+        severity: "info",
+        page: shortName,
+        detail: "Empty Wiki Lint placeholder — no content, safe to delete.",
+      })
+      continue
+    }
 
     // Orphan: no inbound links (lowercased slug for case-insensitive match)
     const inbound = inboundCounts.get(p.slug.toLowerCase()) ?? 0
